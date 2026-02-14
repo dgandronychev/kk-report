@@ -96,7 +96,7 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
     if try_handle_phone_step(_reg, user_id, chat_id, t, msg):
         return
-
+    #
     # 2) Команды
     if t == "/start":
         send_text(chat_id, WELCOME_TEXT)
