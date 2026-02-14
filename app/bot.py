@@ -44,7 +44,36 @@ def _extract_message(update: dict) -> Optional[dict]:
         if isinstance(msg2, dict):
             return msg2
 
-    return None
+    callback = None
+    if isinstance(update.get("callback"), dict):
+        callback = update["callback"]
+    elif isinstance(payload, dict) and isinstance(payload.get("callback"), dict):
+        callback = payload.get("callback")
+
+    if not isinstance(callback, dict):
+        return None
+
+    # В callback-апдейтах MAX может передавать исходное сообщение в callback.message,
+    # а данные нажатой кнопки — в callback.payload/data.
+    callback_msg = callback.get("message")
+    if not isinstance(callback_msg, dict):
+        callback_msg = {}
+
+    merged_msg = dict(callback_msg)
+    merged_msg["callback"] = callback
+
+    if "sender" not in merged_msg and isinstance(callback.get("sender"), dict):
+        merged_msg["sender"] = callback.get("sender")
+
+    if "chat_id" not in merged_msg:
+        chat_id = callback.get("chat_id")
+        if chat_id is not None:
+            merged_msg["chat_id"] = chat_id
+
+    if "recipient" not in merged_msg and isinstance(callback.get("recipient"), dict):
+        merged_msg["recipient"] = callback.get("recipient")
+
+    return merged_msg
 
 
 def _msg_text(msg: dict) -> str:
@@ -93,11 +122,21 @@ def _has_attachments(msg: dict) -> bool:
 
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
-    uid = sender.get("user_id")
-    if isinstance(uid, int):
-        return uid
-    if isinstance(uid, str) and uid.isdigit():
-        return int(uid)
+    for key in ("user_id", "id"):
+        uid = sender.get(key)
+        if isinstance(uid, int):
+            return uid
+        if isinstance(uid, str) and uid.isdigit():
+            return int(uid)
+
+    user = sender.get("user")
+    if isinstance(user, dict):
+        for key in ("user_id", "id"):
+            uid = user.get(key)
+            if isinstance(uid, int):
+                return uid
+            if isinstance(uid, str) and uid.isdigit():
+                return int(uid)
     return None
 
 
