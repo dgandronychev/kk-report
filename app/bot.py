@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from datetime import datetime
+import json
 import re
 
 import logging
@@ -85,31 +86,33 @@ def _msg_text(msg: dict) -> str:
             return value.strip()
         return ""
 
-    text = _clean(msg.get("text"))
-    if text:
-        return text
-
-    body = msg.get("body")
-    if isinstance(body, dict):
-        for key in ("text", "caption", "command", "callback_data", "data"):
-            text2 = _clean(body.get(key))
-            if text2:
-                return text2
-
-        callback = body.get("callback")
-        if isinstance(callback, dict):
-            for key in ("text", "data", "payload", "command"):
-                text3 = _clean(callback.get(key))
-                if text3:
-                    return text3
-
-    for container in ("payload", "callback", "action"):
-        node = msg.get(container)
+    def _from_node(node: object) -> str:
+        text = _clean(node)
+        if text:
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    return text
+                nested = _from_node(parsed)
+                return nested or text
+            return text
         if isinstance(node, dict):
-            for key in ("text", "data", "payload", "command"):
-                text4 = _clean(node.get(key))
-                if text4:
-                    return text4
+            for key in ("text", "caption", "command", "callback_data", "data", "payload"):
+                nested = _from_node(node.get(key))
+                if nested:
+                    return nested
+
+        return ""
+
+        direct = _from_node(msg.get("text"))
+        if direct:
+            return direct
+
+        for key in ("body", "payload", "callback", "action"):
+            nested = _from_node(msg.get(key))
+            if nested:
+                return nested
 
     return ""
 
@@ -179,8 +182,11 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     aliases = {
         "start": "/start",
         "registration": "/registration",
+        "register": "/registration",
         "start_job_shift": "/start_job_shift",
+        "start-work-shift": "/start_job_shift",
         "end_work_shift": "/end_work_shift",
+        "end-job-shift": "/end_work_shift",
         "регистрация": "/registration",
         "начало смены": "/start_job_shift",
         "окончание смены": "/end_work_shift",
@@ -190,7 +196,8 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         normalized = t.strip().lower()
         if normalized.startswith("/"):
             normalized = normalized[1:]
-        normalized = normalized.split("@", 1)[0]
+        normalized = normalized.split("@", 1)[0].strip()
+        normalized = re.sub(r"\s+", "_", normalized)
         t = aliases.get(normalized, t)
 
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
