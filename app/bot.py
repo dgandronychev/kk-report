@@ -48,15 +48,36 @@ def _extract_message(update: dict) -> Optional[dict]:
 
 
 def _msg_text(msg: dict) -> str:
-    text = msg.get("text")
-    if isinstance(text, str) and text:
+    def _clean(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return ""
+
+    text = _clean(msg.get("text"))
+    if text:
         return text
 
     body = msg.get("body")
     if isinstance(body, dict):
-        text2 = body.get("text")
-        if isinstance(text2, str):
-            return text2
+        for key in ("text", "caption", "command", "callback_data", "data"):
+            text2 = _clean(body.get(key))
+            if text2:
+                return text2
+
+        callback = body.get("callback")
+        if isinstance(callback, dict):
+            for key in ("text", "data", "payload", "command"):
+                text3 = _clean(callback.get(key))
+                if text3:
+                    return text3
+
+    for container in ("payload", "callback", "action"):
+        node = msg.get(container)
+        if isinstance(node, dict):
+            for key in ("text", "data", "payload", "command"):
+                text4 = _clean(node.get(key))
+                if text4:
+                    return text4
 
     return ""
 
@@ -186,4 +207,3 @@ def run() -> None:
 
     # Polling в основном потоке
     _polling_loop()
-
