@@ -13,19 +13,19 @@ from app.utils.scheduler import start_schedulers
 from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN
 from app.utils.http import run_http
 from app.utils.max_api import get_updates, send_text
+from app.utils.chat_memory import remember_chat_id
 from app.handlers.registration import (
     RegistrationState,
     cmd_registration,
     try_handle_phone_step,
 )
-
-# from app.utils.scheduler import start_scheduler
+from app.handlers import work_shift
 
 logger = logging.getLogger(__name__)
 
 # ===== State (позже вынесешь в отдельный storage) =====
 _reg = RegistrationState(wait_phone_users=set())
-
+_shift = work_shift.WorkShiftState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -96,6 +96,8 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
     if try_handle_phone_step(_reg, user_id, chat_id, t, msg):
         return
+    if work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
+        return
 
     # 2) Команды
     if t == "/start":
@@ -106,9 +108,16 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         cmd_registration(_reg, user_id, chat_id)
         return
 
-    # 3) Default
-    send_text(chat_id, "Команды: /start, /registration")
+    if t == "/start_job_shift":
+        cmd_start_job_shift(_shift, user_id, chat_id)
+        return
 
+    if t == "/end_work_shift":
+        cmd_end_work_shift(_shift, user_id, chat_id)
+        return
+
+    # 3) Default
+    send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift")
 
 def _polling_loop() -> None:
     marker: Optional[int] = None
@@ -139,10 +148,15 @@ def _polling_loop() -> None:
                     continue
 
                 chat_id = _chat_id(msg)
+                if chat_id is None:
+                    continue
+
+                remember_chat_id(chat_id)
+
                 user_id = _sender_id(msg)
                 text = _msg_text(msg)
 
-                if chat_id is None or user_id is None or not text:
+                if user_id is None or not text:
                     continue
 
                 try:
