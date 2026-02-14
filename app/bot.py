@@ -62,7 +62,9 @@ def _extract_message(update: dict) -> Optional[dict]:
     merged_msg = dict(callback_msg)
     merged_msg["callback"] = callback
 
-    if "sender" not in merged_msg and isinstance(callback.get("sender"), dict):
+    # Для callback-событий приоритет у callback.sender (это тот, кто нажал кнопку).
+    # callback.message.sender часто содержит автора исходного сообщения (бота).
+    if isinstance(callback.get("sender"), dict):
         merged_msg["sender"] = callback.get("sender")
 
     if "chat_id" not in merged_msg:
@@ -122,21 +124,31 @@ def _has_attachments(msg: dict) -> bool:
 
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
+
+    def _to_int(value: object) -> Optional[int]:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            value = value.strip()
+            if value.isdigit():
+                return int(value)
+            m = re.search(r"\d+", value)
+            if m:
+                return int(m.group(0))
+        return None
+
     for key in ("user_id", "id"):
-        uid = sender.get(key)
-        if isinstance(uid, int):
+        uid = _to_int(sender.get(key))
+        if uid is not None:
             return uid
-        if isinstance(uid, str) and uid.isdigit():
-            return int(uid)
 
     user = sender.get("user")
     if isinstance(user, dict):
         for key in ("user_id", "id"):
-            uid = user.get(key)
-            if isinstance(uid, int):
+            uid = _to_int(user.get(key))
+            if uid is not None:
                 return uid
-            if isinstance(uid, str) and uid.isdigit():
-                return int(uid)
+
     return None
 
 
