@@ -90,6 +90,7 @@ def _has_attachments(msg: dict) -> bool:
         if isinstance(attachments, list) and len(attachments) > 0:
             return True
     return False
+
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
     uid = sender.get("user_id")

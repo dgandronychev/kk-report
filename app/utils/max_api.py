@@ -36,29 +36,50 @@ def send_text(chat_id: int, text: str) -> None:
 
 
 def send_text_with_reply_buttons(chat_id: int, text: str, button_texts: list[str]) -> None:
-    link_variants = [
+    text_rows = [[{"type": "text", "text": button_text}] for button_text in button_texts]
+    callback_rows = [
+        [{"type": "callback", "text": button_text, "payload": button_text}]
+        for button_text in button_texts
+    ]
+
+    payload_variants = [
         {
-            "type": "reply",
-            "buttons": [
-                [{"type": "text", "text": button_text}] for button_text in button_texts
-            ],
+            "keyboard": {
+                "type": "reply",
+                "buttons": text_rows,
+            }
         },
         {
-            "type": "reply",
-            "buttons": [
-                [{"type": "callback", "text": button_text, "payload": button_text}]
-                for button_text in button_texts
-            ],
+            "reply_markup": {
+                "keyboard": [[{"text": button_text}] for button_text in button_texts],
+                "resize_keyboard": True,
+                "one_time_keyboard": False,
+            }
+        },
+        {
+            "attachments": [
+                {
+                    "type": "reply_keyboard",
+                    "payload": {"buttons": text_rows},
+                }
+            ]
+        },
+        {
+            "attachments": [
+                {
+                    "type": "inline_keyboard",
+                    "payload": {"buttons": callback_rows},
+                }
+            ]
         },
     ]
 
-    for link in link_variants:
+    for variant in payload_variants:
         try:
-            send_message(chat_id=chat_id, text=text, link=link)
+            send_message(chat_id=chat_id, text=text, extra_payload=variant)
             return
         except Exception:
-            logger.exception("[MAX API] failed to send keyboard with link=%s", link)
-
+            logger.exception("[MAX API] failed to send keyboard with payload=%s", variant)
     send_text(chat_id=chat_id, text=text)
 
 
@@ -67,6 +88,7 @@ def send_message(
     text: Optional[str] = None,
     attachments: Optional[list[dict]] = None,
     link: Optional[dict[str, Any]] = None,
+    extra_payload: Optional[dict[str, Any]] = None,
 ) -> dict:
     payload: dict[str, Any] = {}
     if text:
@@ -75,9 +97,11 @@ def send_message(
         payload["attachments"] = attachments
     if link:
         payload["link"] = link
+    if extra_payload:
+        payload.update(extra_payload)
 
     if not payload:
-        raise ValueError("send_message requires text or attachments")
+        raise ValueError("send_message requires payload")
 
     r = requests.post(
         f"{API_BASE}/messages",
