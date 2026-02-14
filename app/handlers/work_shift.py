@@ -33,6 +33,16 @@ def _extract_fio(msg: dict) -> str:
 def _extract_attachments(msg: dict) -> List[dict]:
     attachments = msg.get("attachments")
     if not isinstance(attachments, list):
+        body = msg.get("body")
+        if isinstance(body, dict):
+            attachments = body.get("attachments")
+
+    if not isinstance(attachments, list):
+        payload = msg.get("payload")
+        if isinstance(payload, dict):
+            attachments = payload.get("attachments")
+
+    if not isinstance(attachments, list):
         return []
 
     files: List[dict] = []
