@@ -117,16 +117,18 @@ def _msg_text(msg: dict) -> str:
 
             return ""
 
-        direct = _from_node(msg.get("text"))
-        if direct:
-            return direct
+        return ""
 
-        # Для callback-событий сначала ищем явную команду в callback/payload/action,
-        # иначе текст исходного сообщения (body.text) может перехватить маршрутизацию.
-        for key in ("callback", "payload", "action", "body"):
-            nested = _from_node(msg.get(key))
-            if nested:
-                return nested
+    direct = _from_node(msg.get("text"))
+    if direct:
+        return direct
+
+    # Для callback-событий сначала ищем явную команду в callback/payload/action,
+    # иначе текст исходного сообщения (body.text) может перехватить маршрутизацию.
+    for key in ("callback", "payload", "action", "body"):
+        nested = _from_node(msg.get(key))
+        if nested:
+            return nested
 
     return ""
 
