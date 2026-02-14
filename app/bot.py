@@ -81,6 +81,9 @@ def _msg_text(msg: dict) -> str:
 
     return ""
 
+def _has_attachments(msg: dict) -> bool:
+    attachments = msg.get("attachments")
+    return isinstance(attachments, list) and len(attachments) > 0
 
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
@@ -121,6 +124,9 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     # 2) Команды
+    if not t:
+        return
+
     if t == "/start":
         send_text(chat_id, WELCOME_TEXT)
         return
@@ -177,7 +183,10 @@ def _polling_loop() -> None:
                 user_id = _sender_id(msg)
                 text = _msg_text(msg)
 
-                if user_id is None or not text:
+                if user_id is None:
+                    continue
+
+                if not text and not _has_attachments(msg):
                     continue
 
                 try:
