@@ -1,0 +1,7 @@
+include:
+  - project: 'telegram-clean-car/clean-car-docker'
+    file: '/gitlab-ci.template.yml'
+
+variables:
+  BOT_PLATFORM: "max"
+  SERVICE_NAME: "kk_report"
