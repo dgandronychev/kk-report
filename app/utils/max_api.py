@@ -35,53 +35,38 @@ def send_text(chat_id: int, text: str) -> None:
     send_message(chat_id=chat_id, text=text)
 
 
-def send_text_with_reply_buttons(chat_id: int, text: str, button_texts: list[str]) -> None:
-    text_rows = [[{"type": "text", "text": button_text}] for button_text in button_texts]
-    callback_rows = [
-        [{"type": "callback", "text": button_text, "payload": button_text}]
-        for button_text in button_texts
-    ]
+def send_text_with_reply_buttons(
+    chat_id: int,
+    text: str,
+    button_texts: list[str],
+    button_payloads: Optional[list[str]] = None,
+) -> None:
+    if button_payloads is not None and len(button_payloads) != len(button_texts):
+        raise ValueError("button_payloads length should match button_texts length")
 
-    payload_variants = [
-        {
-            "keyboard": {
-                "type": "reply",
-                "buttons": text_rows,
-            }
-        },
-        {
-            "reply_markup": {
-                "keyboard": [[{"text": button_text}] for button_text in button_texts],
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-            }
-        },
-        {
-            "attachments": [
-                {
-                    "type": "reply_keyboard",
-                    "payload": {"buttons": text_rows},
-                }
-            ]
-        },
-        {
-            "attachments": [
-                {
-                    "type": "inline_keyboard",
-                    "payload": {"buttons": callback_rows},
-                }
-            ]
-        },
-    ]
+    callback_rows = []
+    for idx, button_text in enumerate(button_texts):
+        payload = button_payloads[idx] if button_payloads else button_text
+        callback_rows.append(
+            [{"type": "callback", "text": button_text, "payload": payload}]
+        )
 
-    for variant in payload_variants:
-        try:
-            send_message(chat_id=chat_id, text=text, extra_payload=variant)
-            return
-        except Exception:
-            logger.exception("[MAX API] failed to send keyboard with payload=%s", variant)
-    send_text(chat_id=chat_id, text=text)
-
+    try:
+        send_message(
+            chat_id=chat_id,
+            text=text,
+            extra_payload={
+                "attachments": [
+                    {
+                        "type": "inline_keyboard",
+                        "payload": {"buttons": callback_rows},
+                    }
+                ]
+            },
+        )
+    except Exception:
+        logger.exception("[MAX API] failed to send inline keyboard")
+        send_text(chat_id=chat_id, text=text)
 
 def send_message(
     chat_id: int,

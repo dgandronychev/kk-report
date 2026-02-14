@@ -78,6 +78,7 @@ def _send_work_shift_prompt(chat_id: int) -> None:
         chat_id=chat_id,
         text="Прикрепите фото/видео/файл и нажмите «Готово». Для отмены нажмите «Выход».",
         button_texts=["Готово", "Выход"],
+        button_payloads=["work_shift_done", "work_shift_exit"],
     )
 def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_end.discard(user_id)
