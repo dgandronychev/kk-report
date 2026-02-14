@@ -82,9 +82,14 @@ def _msg_text(msg: dict) -> str:
     return ""
 
 def _has_attachments(msg: dict) -> bool:
-    attachments = msg.get("attachments")
-    return isinstance(attachments, list) and len(attachments) > 0
-
+    for attachments in (
+        msg.get("attachments"),
+        (msg.get("body") or {}).get("attachments") if isinstance(msg.get("body"), dict) else None,
+        (msg.get("payload") or {}).get("attachments") if isinstance(msg.get("payload"), dict) else None,
+    ):
+        if isinstance(attachments, list) and len(attachments) > 0:
+            return True
+    return False
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
     uid = sender.get("user_id")

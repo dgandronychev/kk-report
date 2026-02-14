@@ -36,14 +36,30 @@ def send_text(chat_id: int, text: str) -> None:
 
 
 def send_text_with_reply_buttons(chat_id: int, text: str, button_texts: list[str]) -> None:
-    buttons = [[{"type": "callback", "text": button_text, "payload": button_text}] for button_text in button_texts]
-    link = {"type": "reply", "buttons": buttons}
+    link_variants = [
+        {
+            "type": "reply",
+            "buttons": [
+                [{"type": "text", "text": button_text}] for button_text in button_texts
+            ],
+        },
+        {
+            "type": "reply",
+            "buttons": [
+                [{"type": "callback", "text": button_text, "payload": button_text}]
+                for button_text in button_texts
+            ],
+        },
+    ]
 
-    try:
-        send_message(chat_id=chat_id, text=text, link=link)
-    except Exception:
-        logger.exception("[MAX API] failed to send keyboard, fallback to plain text")
-        send_text(chat_id=chat_id, text=text)
+    for link in link_variants:
+        try:
+            send_message(chat_id=chat_id, text=text, link=link)
+            return
+        except Exception:
+            logger.exception("[MAX API] failed to send keyboard with link=%s", link)
+
+    send_text(chat_id=chat_id, text=text)
 
 
 def send_message(
