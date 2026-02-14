@@ -4,7 +4,7 @@ from __future__ import annotations
 import requests
 import logging
 import time
-from typing import Optional
+from typing import Any, Optional
 from app.config import API_BASE, HEADERS
 
 logger = logging.getLogger(__name__)
@@ -35,12 +35,30 @@ def send_text(chat_id: int, text: str) -> None:
     send_message(chat_id=chat_id, text=text)
 
 
-def send_message(chat_id: int, text: Optional[str] = None, attachments: Optional[list[dict]] = None) -> dict:
-    payload: dict = {}
+def send_text_with_reply_buttons(chat_id: int, text: str, button_texts: list[str]) -> None:
+    buttons = [[{"type": "callback", "text": button_text, "payload": button_text}] for button_text in button_texts]
+    link = {"type": "reply", "buttons": buttons}
+
+    try:
+        send_message(chat_id=chat_id, text=text, link=link)
+    except Exception:
+        logger.exception("[MAX API] failed to send keyboard, fallback to plain text")
+        send_text(chat_id=chat_id, text=text)
+
+
+def send_message(
+    chat_id: int,
+    text: Optional[str] = None,
+    attachments: Optional[list[dict]] = None,
+    link: Optional[dict[str, Any]] = None,
+) -> dict:
+    payload: dict[str, Any] = {}
     if text:
         payload["text"] = text
     if attachments:
         payload["attachments"] = attachments
+    if link:
+        payload["link"] = link
 
     if not payload:
         raise ValueError("send_message requires text or attachments")

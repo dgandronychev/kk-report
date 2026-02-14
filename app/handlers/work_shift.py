@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List
 
 from app.config import WORK_SHIFT_CHAT_ID
-from app.utils.max_api import send_message, send_text
+from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
 
 @dataclass
 class WorkShiftState:
@@ -43,6 +43,16 @@ def _extract_attachments(msg: dict) -> List[dict]:
             attachments = payload.get("attachments")
 
     if not isinstance(attachments, list):
+        body = msg.get("body")
+        if isinstance(body, dict):
+            attachments = body.get("attachments")
+
+    if not isinstance(attachments, list):
+        payload = msg.get("payload")
+        if isinstance(payload, dict):
+            attachments = payload.get("attachments")
+
+    if not isinstance(attachments, list):
         return []
 
     files: List[dict] = []
@@ -63,20 +73,23 @@ def _caption(action: str, fio: str, username: str) -> str:
         f"{action}\n"
     )
 
-
+def _send_work_shift_prompt(chat_id: int) -> None:
+    send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text="Прикрепите фото/видео/файл и нажмите «Готово». Для отмены нажмите «Выход».",
+        button_texts=["Готово", "Выход"],
+    )
 def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_end.discard(user_id)
     st.wait_files_start.add(user_id)
     st.files_by_user[user_id] = []
-    send_text(chat_id, "Прикрепите фото/видео/файл и нажмите 'Готово'. Для отмены напишите 'Выход'.")
-
+    _send_work_shift_prompt(chat_id)
 
 def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_start.discard(user_id)
     st.wait_files_end.add(user_id)
     st.files_by_user[user_id] = []
-    send_text(chat_id, "Прикрепите фото/видео/файл и нажмите 'Готово'. Для отмены напишите 'Выход'.")
-
+    _send_work_shift_prompt(chat_id)
 
 def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action: str) -> bool:
     files = st.files_by_user.get(user_id, [])
@@ -106,7 +119,7 @@ def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, t
 
     clean_text = text.strip()
 
-    if clean_text == "Выход":
+    if clean_text in {"Выход", "work_shift_exit"}:
         st.wait_files_start.discard(user_id)
         st.wait_files_end.discard(user_id)
         st.files_by_user.pop(user_id, None)
@@ -120,10 +133,10 @@ def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, t
         send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
         return True
 
-    if clean_text == "Готово":
+    if clean_text in {"Готово", "work_shift_done"}:
         if is_start_flow:
             return _finalize(st, user_id, chat_id, msg, "Начало смены")
         return _finalize(st, user_id, chat_id, msg, "Окончание смены")
 
-    send_text(chat_id, "Прикрепите файл, либо нажмите 'Готово' или 'Выход'.")
+    _send_work_shift_prompt(chat_id)
     return True
