@@ -37,14 +37,26 @@ def _extract_message(update: dict) -> Optional[dict]:
     # Вариант 1: {"message": {...}}
     msg = update.get("message")
     if isinstance(msg, dict):
-        return msg
+        merged_msg = dict(msg)
+        # Иногда sender/recipient/chat_id находятся рядом с message на уровне update.
+        for key in ("sender", "recipient", "chat_id", "body", "payload"):
+            if key not in merged_msg and update.get(key) is not None:
+                merged_msg[key] = update.get(key)
+        return merged_msg
 
     # Вариант 2: {"payload": {"message": {...}}}
     payload = update.get("payload")
     if isinstance(payload, dict):
         msg2 = payload.get("message")
         if isinstance(msg2, dict):
-            return msg2
+            merged_msg = dict(msg2)
+            # Во многих апдейтах MAX sender/chat_id лежат на уровне payload.
+            for key in ("sender", "recipient", "chat_id", "body"):
+                if key not in merged_msg and payload.get(key) is not None:
+                    merged_msg[key] = payload.get(key)
+            if "payload" not in merged_msg:
+                merged_msg["payload"] = payload
+            return merged_msg
 
     callback = None
     if isinstance(update.get("callback"), dict):
@@ -103,13 +115,15 @@ def _msg_text(msg: dict) -> str:
                 if nested:
                     return nested
 
-        return ""
+            return ""
 
         direct = _from_node(msg.get("text"))
         if direct:
             return direct
 
-        for key in ("body", "payload", "callback", "action"):
+        # Для callback-событий сначала ищем явную команду в callback/payload/action,
+        # иначе текст исходного сообщения (body.text) может перехватить маршрутизацию.
+        for key in ("callback", "payload", "action", "body"):
             nested = _from_node(msg.get(key))
             if nested:
                 return nested
@@ -128,6 +142,8 @@ def _has_attachments(msg: dict) -> bool:
 
 def _sender_id(msg: dict) -> Optional[int]:
     sender = msg.get("sender") or {}
+    if not isinstance(sender, dict):
+        sender = {}
 
     def _to_int(value: object) -> Optional[int]:
         if isinstance(value, int):
@@ -146,31 +162,43 @@ def _sender_id(msg: dict) -> Optional[int]:
         if uid is not None:
             return uid
 
-    user = sender.get("user")
-    if isinstance(user, dict):
-        for key in ("user_id", "id"):
-            uid = _to_int(user.get(key))
-            if uid is not None:
-                return uid
+    for node in (
+        sender.get("user"),
+        (msg.get("body") or {}).get("sender") if isinstance(msg.get("body"), dict) else None,
+        (msg.get("payload") or {}).get("sender") if isinstance(msg.get("payload"), dict) else None,
+        (msg.get("callback") or {}).get("sender") if isinstance(msg.get("callback"), dict) else None,
+    ):
+        if isinstance(node, dict):
+            for key in ("user_id", "id"):
+                uid = _to_int(node.get(key))
+                if uid is not None:
+                    return uid
+
 
     return None
 
 
 def _chat_id(msg: dict) -> Optional[int]:
-    # Иногда chat_id лежит прямо в msg
-    cid = msg.get("chat_id")
-    if isinstance(cid, int):
-        return cid
-    if isinstance(cid, str) and cid.lstrip("-").isdigit():
-        return int(cid)
+    def _to_chat_id(value: object) -> Optional[int]:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.lstrip("-").isdigit():
+            return int(value)
+        return None
 
-    # Иногда в recipient
-    recipient = msg.get("recipient") or {}
-    cid2 = recipient.get("chat_id")
-    if isinstance(cid2, int):
-        return cid2
-    if isinstance(cid2, str) and cid2.lstrip("-").isdigit():
-        return int(cid2)
+    for value in (
+        msg.get("chat_id"),
+        (msg.get("recipient") or {}).get("chat_id") if isinstance(msg.get("recipient"), dict) else None,
+        (msg.get("body") or {}).get("chat_id") if isinstance(msg.get("body"), dict) else None,
+        (msg.get("body") or {}).get("recipient", {}).get("chat_id") if isinstance((msg.get("body") or {}).get("recipient"), dict) else None,
+        (msg.get("payload") or {}).get("chat_id") if isinstance(msg.get("payload"), dict) else None,
+        (msg.get("payload") or {}).get("recipient", {}).get("chat_id") if isinstance((msg.get("payload") or {}).get("recipient"), dict) else None,
+        (msg.get("callback") or {}).get("chat_id") if isinstance(msg.get("callback"), dict) else None,
+        (msg.get("callback") or {}).get("recipient", {}).get("chat_id") if isinstance((msg.get("callback") or {}).get("recipient"), dict) else None,
+    ):
+        cid = _to_chat_id(value)
+        if cid is not None:
+            return cid
 
     return None
 
