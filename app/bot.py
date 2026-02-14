@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from datetime import datetime
+import re
 
 import logging
 import threading
@@ -173,6 +174,24 @@ def _chat_id(msg: dict) -> Optional[int]:
 # ===== Routing =====
 def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     t = text.strip()
+
+    # Кнопки в MAX могут присылать либо slash-команды, либо человекочитаемый текст.
+    aliases = {
+        "start": "/start",
+        "registration": "/registration",
+        "start_job_shift": "/start_job_shift",
+        "end_work_shift": "/end_work_shift",
+        "регистрация": "/registration",
+        "начало смены": "/start_job_shift",
+        "окончание смены": "/end_work_shift",
+    }
+
+    if t:
+        normalized = t.strip().lower()
+        if normalized.startswith("/"):
+            normalized = normalized[1:]
+        normalized = normalized.split("@", 1)[0]
+        t = aliases.get(normalized, t)
 
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
     if try_handle_phone_step(_reg, user_id, chat_id, t, msg):
