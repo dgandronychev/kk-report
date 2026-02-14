@@ -109,11 +109,11 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     if t == "/start_job_shift":
-        cmd_start_job_shift(_shift, user_id, chat_id)
+        work_shift.cmd_start_job_shift(_shift, user_id, chat_id)
         return
 
     if t == "/end_work_shift":
-        cmd_end_work_shift(_shift, user_id, chat_id)
+        work_shift.cmd_end_work_shift(_shift, user_id, chat_id)
         return
 
     # 3) Default
