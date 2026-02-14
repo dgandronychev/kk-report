@@ -32,11 +32,24 @@ def get_updates(marker: Optional[int] = None) -> dict:
 
 
 def send_text(chat_id: int, text: str) -> None:
+    send_message(chat_id=chat_id, text=text)
+
+
+def send_message(chat_id: int, text: Optional[str] = None, attachments: Optional[list[dict]] = None) -> dict:
+    payload: dict = {}
+    if text:
+        payload["text"] = text
+    if attachments:
+        payload["attachments"] = attachments
+
+    if not payload:
+        raise ValueError("send_message requires text or attachments")
+
     r = requests.post(
         f"{API_BASE}/messages",
         headers={**HEADERS, "Content-Type": "application/json"},
         params={"chat_id": chat_id},
-        json={"text": text},
+        json=payload,
         timeout=30,
     )
     if not r.ok:

@@ -5,8 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List
 
 from app.config import WORK_SHIFT_CHAT_ID
-from app.utils.max_api import send_text
-
+from app.utils.max_api import send_message, send_text
 
 @dataclass
 class WorkShiftState:
@@ -80,7 +79,7 @@ def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action:
     report = _caption(action, fio, username)
     report = f"{report}\n📎 Вложений: {len(files)}"
 
-    send_text(WORK_SHIFT_CHAT_ID, report)
+    send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
     send_text(chat_id, "Ваша заявка сформирована")
 
     st.wait_files_start.discard(user_id)
