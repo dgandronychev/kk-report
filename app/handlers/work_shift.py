@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-
+#
 from app.config import WORK_SHIFT_CHAT_ID
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
-
 
 @dataclass
 class WorkShiftState:
