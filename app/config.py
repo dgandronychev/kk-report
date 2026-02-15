@@ -18,8 +18,14 @@ URL_GET_FIO = "https://stage.app.clean-car.net/api/v1/bots/accident/retrieve/",
 LOGISTICS_CHAT_IDS = "199909595,199909595"
 REPORT_CHAT_ID = "199909595"
 WORK_SHIFT_CHAT_ID ="199909595"
+DAMAGE_CHAT_ID_CITY = "199909595"
+DAMAGE_CHAT_ID_YANDEX = "199909595"
+DAMAGE_CHAT_ID_BELKA = "199909595"
 
 URL_GOOGLE_SHEETS_CHART = "https://docs.google.com/spreadsheets/d/15Kw7bweFKg3Dp0INeA47eki1cuPIgtVgk_o_Ul3LGyM/edit?gid=1647640846#gid=1647640846"
+GSPREAD_URL_MAIN = "https://docs.google.com/spreadsheets/d/1Rk_9eyjx0u5dUGnz84-6GCshd1zLLWOR-QGPZtQTMKg/edit?gid=2129054551#gid=2129054551"
+GSPREAD_URL_ANSWER = "https://docs.google.com/spreadsheets/d/1p044-xtk5TxFOsPZ9l_kbthc53toqdh3kRXrGbU5Iao/edit?gid=0#gid=0"
+
 WELCOME_TEXT = (
     "Здравствуйте, это бот компании КлинКар\n\n"
     "Для начала работы пройдите регистрацию по команде /registration"
