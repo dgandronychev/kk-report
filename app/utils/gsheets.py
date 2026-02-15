@@ -92,8 +92,46 @@ def find_logistics_rows_shift(now: Optional[datetime] = None) -> List[Tuple[str,
 
     return result
 
-def write_in_answers_ras_shift(tlist: list, page: str = "Лист1") -> None:
-    gc: Client = gspread.service_account("app/creds.json")
-    sh = gc.open_by_url(URL_GOOGLE_SHEETS_CHART)
-    ws = sh.worksheet(page)
-    ws.append_row(tlist, value_input_option="RAW")
+def write_in_answers_ras_shift(
+    tlist: list,
+    page: str = "Лист1",
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+) -> None:
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            gc: Client = gspread.service_account("app/creds.json")
+            sh = gc.open_by_url(URL_GOOGLE_SHEETS_CHART)
+            ws = sh.worksheet(page)
+            ws.append_row(tlist, value_input_option="RAW")
+            return
+        except APIError as e:
+            last_error = e
+            if attempt == max_attempts:
+                raise
+            sleep_for = base_delay * attempt
+            logger.warning(
+                "write_in_answers_ras_shift retry %s/%s after APIError: %s",
+                attempt,
+                max_attempts,
+                e,
+            )
+            import time as _time
+            _time.sleep(sleep_for)
+        except Exception as e:
+            last_error = e
+            if attempt == max_attempts:
+                raise
+            sleep_for = base_delay * attempt
+            logger.warning(
+                "write_in_answers_ras_shift retry %s/%s after error: %s",
+                attempt,
+                max_attempts,
+                e,
+            )
+            import time as _time
+            _time.sleep(sleep_for)
+
+    if last_error:
+        raise last_error
