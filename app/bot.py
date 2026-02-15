@@ -77,18 +77,18 @@ def _extract_message(update: dict) -> Optional[dict]:
             if "payload" not in merged_msg:
                 merged_msg["payload"] = payload
 
-    # Аналогично варианту выше, callback может идти рядом с message.
-    if isinstance(callback, dict):
-        merged_msg["callback"] = callback
-        if isinstance(callback.get("sender"), dict):
-            merged_msg["sender"] = callback.get("sender")
-        chat_id = callback.get("chat_id")
-        if chat_id is not None:
-            merged_msg["chat_id"] = chat_id
-        if "recipient" not in merged_msg and isinstance(callback.get("recipient"), dict):
-            merged_msg["recipient"] = callback.get("recipient")
+        # Аналогично варианту выше, callback может идти рядом с message.
+        if isinstance(callback, dict):
+            merged_msg["callback"] = callback
+            if isinstance(callback.get("sender"), dict):
+                merged_msg["sender"] = callback.get("sender")
+            chat_id = callback.get("chat_id")
+            if chat_id is not None:
+                merged_msg["chat_id"] = chat_id
+            if "recipient" not in merged_msg and isinstance(callback.get("recipient"), dict):
+                merged_msg["recipient"] = callback.get("recipient")
 
-    return merged_msg
+        return merged_msg
 
     if not isinstance(callback, dict):
         return None
@@ -250,138 +250,6 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "start-work-shift": "/start_job_shift",
         "end_work_shift": "/end_work_shift",
         "end-job-shift": "/end_work_shift",
-        "регистрация": "/registration",
-        "начало смены": "/start_job_shift",
-        "окончание смены": "/end_work_shift",
-    }
-
-    if t:
-        normalized = t.strip().lower()
-        if normalized.startswith("/"):
-            normalized = normalized[1:]
-        normalized = normalized.split("@", 1)[0].strip()
-        normalized = re.sub(r"\s+", "_", normalized)
-        t = aliases.get(normalized, t)
-
-    # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
-    if await try_handle_phone_step(_reg, user_id, chat_id, t, msg):
-        return
-    if await work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
-        return
-
-    # 2) Команды
-    if not t:
-        return
-
-    if t == "/start":
-        await send_text(chat_id, WELCOME_TEXT)
-        return
-
-    if t == "/registration":
-        await cmd_registration(_reg, user_id, chat_id)
-        return
-
-    if t == "/start_job_shift":
-        await work_shift.cmd_start_job_shift(_shift, user_id, chat_id)
-        return
-
-    if t == "/end_work_shift":
-        await work_shift.cmd_end_work_shift(_shift, user_id, chat_id)
-        return
-
-    # app/bot.py
-    from __future__ import annotations
-    import asyncio
-    import sys
-    from pathlib import Path
-    from datetime import datetime
-    import json
-    import re
-
-    import logging
-    import threading
-    from typing import Optional
-
-    from app.utils.scheduler import start_schedulers
-    from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN
-    from app.utils.http import run_http
-    from app.utils.max_api import get_updates, send_text
-    from app.utils.chat_memory import remember_chat_id
-    from app.handlers.registration import (
-        RegistrationState,
-        cmd_registration,
-        try_handle_phone_step,
-    )
-    from app.handlers import work_shift
-    from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
-
-    logger = logging.getLogger(__name__)
-
-    # ===== State (позже вынесешь в отдельный storage) =====
-    _reg = RegistrationState(wait_phone_users=set())
-    _shift = work_shift.WorkShiftState()
-    _damage = DamageState()
-
-    # ===== MAX update parsing helpers =====
-    def _extract_message(update: dict) -> Optional[dict]:
-        """
-        Достаёт message из апдейта максимально терпимо к схеме MAX.
-        """
-        payload = update.get("payload")
-
-        callback = None
-        if isinstance(update.get("callback"), dict):
-            callback = update["callback"]
-        elif isinstance(payload, dict) and isinstance(payload.get("callback"), dict):
-            callback = payload.get("callback")
-
-        # Вариант 1: {"message": {...}}
-        msg = update.get("message")
-        if isinstance(msg, dict):
-            merged_msg = dict(msg)
-            # Иногда sender/recipient/chat_id находятся рядом с message на уровне update.
-            for key in ("sender", "recipient", "chat_id", "body", "payload"):
-                if key not in merged_msg and update.get(key) is not None:
-                    merged_msg[key] = update.get(key)
-            # В некоторых callback-апдейтах одновременно приходит message + callback.
-            # Если callback есть, сохраняем его и приоритезируем sender/chat_id от callback.
-            if isinstance(callback, dict):
-
-    @ @-226
-
-    , 91 + 228, 101 @ @
-
-    def _chat_id(msg: dict) -> Optional[int]:
-        (msg.get("body") or {}).get("recipient", {}).get("chat_id") if isinstance(
-            (msg.get("body") or {}).get("recipient"), dict) else None,
-        (msg.get("payload") or {}).get("chat_id") if isinstance(msg.get("payload"), dict) else None,
-        (msg.get("payload") or {}).get("recipient", {}).get("chat_id") if isinstance(
-            (msg.get("payload") or {}).get("recipient"), dict) else None,
-        (msg.get("callback") or {}).get("chat_id") if isinstance(msg.get("callback"), dict) else None,
-        (msg.get("callback") or {}).get("recipient", {}).get("chat_id") if isinstance(
-            (msg.get("callback") or {}).get("recipient"), dict) else None,
-
-    ):
-    cid = _to_chat_id(value)
-    if cid is not None:
-        return cid
-
-    return None
-
-
-# ===== Routing =====
-async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
-    t = text.strip()
-
-    # Кнопки в MAX могут присылать либо slash-команды, либо человекочитаемый текст.
-    aliases = {
-        "start": "/start",
-        "registration": "/registration",
-        "register": "/registration",
-        "start_job_shift": "/start_job_shift",
-        "start-work-shift": "/start_job_shift",
-        "end_work_shift": "/end_work_shift",
-        "end-job-shift": "/end_work_shift",
         "damage": "/damage",
         "повреждение": "/damage",
         "регистрация": "/registration",
@@ -401,8 +269,6 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await try_handle_phone_step(_reg, user_id, chat_id, t, msg):
         return
     if await work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
-        return
-    if await try_handle_damage_step(_damage, user_id, chat_id, t, msg):
         return
     if await try_handle_damage_step(_damage, user_id, chat_id, t, msg):
         return
@@ -478,11 +344,7 @@ async def _polling_loop() -> None:
 
                 # Callback events (inline keyboard buttons) can come without text
                 # and without attachments, so they still must reach the handlers.
-                if (
-                        not text
-                        and not _has_attachments(msg)
-                        and not isinstance(msg.get("callback"), dict)
-                ):
+                if not text and not _has_attachments(msg) and not isinstance(msg.get("callback"), dict):
                     continue
 
                 try:
@@ -498,14 +360,14 @@ async def _polling_loop() -> None:
 def run() -> None:
     Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
     log_name = f'{LOGS_DIR}/{datetime.now().strftime("%Y-%m-%d")}.log'
-    file_handler = logging.FileHandler(log_name, mode='a', encoding='utf-8')
+    file_handler = logging.FileHandler(log_name, mode="a", encoding="utf-8")
     file_handler.setLevel(logging.INFO)
-    fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     file_handler.setFormatter(fmt)
 
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -513,12 +375,12 @@ def run() -> None:
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(logging.INFO)
     stream_handler.setFormatter(fmt)
-    logger.addHandler(stream_handler)
+    root_logger.addHandler(stream_handler)
 
     logger.info(
         "MAX_TOKEN loaded | length=%s | prefix=%s***",
         len(MAX_TOKEN),
-        MAX_TOKEN[:4]
+        MAX_TOKEN[:4],
     )
 
     # HTTP endpoints (/notify, /notify_image, /health)
