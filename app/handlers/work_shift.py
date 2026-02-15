@@ -142,20 +142,8 @@ async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> 
 
 async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action: str) -> bool:
     files = st.files_by_user.get(user_id, [])
-    logger.info(
-        "work_shift finalize requested action=%s chat_id=%s user_id=%s files_count=%s",
-        action,
-        chat_id,
-        user_id,
-        len(files),
-    )
+
     if not files:
-        logger.warning(
-            "work_shift finalize rejected: empty attachments action=%s chat_id=%s user_id=%s",
-            action,
-            chat_id,
-            user_id,
-        )
         await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
@@ -166,13 +154,6 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
 
     await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
     await send_text(chat_id, "Ваша заявка сформирована")
-    logger.info(
-        "work_shift finalize success action=%s chat_id=%s user_id=%s sent_attachments=%s",
-        action,
-        chat_id,
-        user_id,
-        len(files),
-    )
 
     _clear_flow(st, user_id, chat_id)
     return True
@@ -215,61 +196,23 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
     ]
     normalized_candidates = {_normalize_control_text(candidate) for candidate in raw_candidates}
     callback_data = msg.get("callback")
-    logger.info(
-        "work_shift step chat_id=%s user_id=%s flow_user_id=%s is_start_flow=%s text=%r raw_candidates=%s normalized_candidates=%s callback=%s",
-        chat_id,
-        user_id,
-        flow_user_id,
-        is_start_flow,
-        text,
-        raw_candidates,
-        sorted(normalized_candidates),
-        _safe_dump(callback_data),
-    )
 
     if user_id != flow_user_id:
-        logger.info(
-            "work_shift foreign event ignored chat_id=%s user_id=%s flow_user_id=%s text=%r",
-            chat_id,
-            user_id,
-            flow_user_id,
-            text,
-        )
         return True
 
     if normalized_candidates & {"выход", "work_shift_exit"}:
-        logger.info(
-            "work_shift exit requested chat_id=%s user_id=%s flow_user_id=%s",
-            chat_id,
-            user_id,
-            flow_user_id,
-        )
         _clear_flow(st, flow_user_id, chat_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
     if normalized_candidates & {"готово", "work_shift_done"}:
-        logger.info(
-            "work_shift done requested chat_id=%s user_id=%s flow_user_id=%s is_start_flow=%s",
-            chat_id,
-            user_id,
-            flow_user_id,
-            is_start_flow,
-        )
         if is_start_flow:
             return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
         return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
 
     is_callback_event = isinstance(msg.get("callback"), dict)
     attachments = _extract_attachments(msg, include_nested=not is_callback_event)
-    logger.info(
-        "work_shift attachments parsed chat_id=%s user_id=%s flow_user_id=%s is_callback_event=%s extracted=%s",
-        chat_id,
-        user_id,
-        flow_user_id,
-        is_callback_event,
-        len(attachments),
-    )
+
     if attachments:
         files = st.files_by_user.setdefault(flow_user_id, [])
         seen_keys = st.seen_file_keys_by_user.setdefault(flow_user_id, set())
@@ -284,36 +227,10 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
 
         if new_files:
             files.extend(new_files)
-            logger.info(
-                "work_shift attachments added chat_id=%s user_id=%s flow_user_id=%s added=%s total=%s",
-                chat_id,
-                user_id,
-                flow_user_id,
-                len(new_files),
-                len(files),
-            )
             await send_text(chat_id, f"Файлов добавлено: {len(new_files)}. Текущее количество: {len(files)}")
         else:
-            logger.info(
-                "work_shift duplicate attachments ignored chat_id=%s user_id=%s flow_user_id=%s total=%s",
-                chat_id,
-                user_id,
-                flow_user_id,
-                len(files),
-            )
             await send_text(chat_id, f"Этот файл уже добавлен. Текущее количество: {len(files)}")
         return True
 
-    logger.warning(
-        "work_shift fallback prompt chat_id=%s user_id=%s flow_user_id=%s text=%r candidates=%s callback=%s msg_keys=%s msg=%s",
-        chat_id,
-        user_id,
-        flow_user_id,
-        text,
-        sorted(normalized_candidates),
-        _safe_dump(msg.get("callback")),
-        sorted(list(msg.keys())),
-        _safe_dump(msg),
-    )
     await _send_work_shift_prompt(chat_id)
     return True
