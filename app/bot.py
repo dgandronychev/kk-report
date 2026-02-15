@@ -34,6 +34,14 @@ def _extract_message(update: dict) -> Optional[dict]:
     """
     Достаёт message из апдейта максимально терпимо к схеме MAX.
     """
+    payload = update.get("payload")
+
+    callback = None
+    if isinstance(update.get("callback"), dict):
+        callback = update["callback"]
+    elif isinstance(payload, dict) and isinstance(payload.get("callback"), dict):
+        callback = payload.get("callback")
+
     # Вариант 1: {"message": {...}}
     msg = update.get("message")
     if isinstance(msg, dict):
@@ -42,10 +50,20 @@ def _extract_message(update: dict) -> Optional[dict]:
         for key in ("sender", "recipient", "chat_id", "body", "payload"):
             if key not in merged_msg and update.get(key) is not None:
                 merged_msg[key] = update.get(key)
+        # В некоторых callback-апдейтах одновременно приходит message + callback.
+        # Если callback есть, сохраняем его и приоритезируем sender/chat_id от callback.
+        if isinstance(callback, dict):
+            merged_msg["callback"] = callback
+            if isinstance(callback.get("sender"), dict):
+                merged_msg["sender"] = callback.get("sender")
+            chat_id = callback.get("chat_id")
+            if chat_id is not None:
+                merged_msg["chat_id"] = chat_id
+            if "recipient" not in merged_msg and isinstance(callback.get("recipient"), dict):
+                merged_msg["recipient"] = callback.get("recipient")
         return merged_msg
 
     # Вариант 2: {"payload": {"message": {...}}}
-    payload = update.get("payload")
     if isinstance(payload, dict):
         msg2 = payload.get("message")
         if isinstance(msg2, dict):
@@ -56,13 +74,19 @@ def _extract_message(update: dict) -> Optional[dict]:
                     merged_msg[key] = payload.get(key)
             if "payload" not in merged_msg:
                 merged_msg["payload"] = payload
-            return merged_msg
 
-    callback = None
-    if isinstance(update.get("callback"), dict):
-        callback = update["callback"]
-    elif isinstance(payload, dict) and isinstance(payload.get("callback"), dict):
-        callback = payload.get("callback")
+    # Аналогично варианту выше, callback может идти рядом с message.
+    if isinstance(callback, dict):
+        merged_msg["callback"] = callback
+        if isinstance(callback.get("sender"), dict):
+            merged_msg["sender"] = callback.get("sender")
+        chat_id = callback.get("chat_id")
+        if chat_id is not None:
+            merged_msg["chat_id"] = chat_id
+        if "recipient" not in merged_msg and isinstance(callback.get("recipient"), dict):
+            merged_msg["recipient"] = callback.get("recipient")
+
+    return merged_msg
 
     if not isinstance(callback, dict):
         return None
