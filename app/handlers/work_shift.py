@@ -144,17 +144,17 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
+    if clean_text in {"Готово", "work_shift_done"}:
+        if is_start_flow:
+            return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
+        return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
+
     attachments = _extract_attachments(msg)
     if attachments:
         files = st.files_by_user.setdefault(flow_user_id, [])
         files.extend(attachments)
         await send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
         return True
-
-    if clean_text in {"Готово", "work_shift_done"}:
-        if is_start_flow:
-            return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
-        return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
 
     await _send_work_shift_prompt(chat_id)
     return True
