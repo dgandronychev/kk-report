@@ -24,6 +24,7 @@ from app.handlers.registration import (
 from app.handlers import work_shift
 from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
 from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step
+from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ _reg = RegistrationState(wait_phone_users=set())
 _shift = work_shift.WorkShiftState()
 _damage = DamageState()
 _sborka = SborkaState()
+_soberi = SoberiState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -254,6 +256,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "end-job-shift": "/end_work_shift",
         "damage": "/damage",
         "sborka": "/sborka",
+        "soberi": "/soberi",
+        "soberi_belka": "/soberi_belka",
         "сборка": "/sborka",
         "повреждение": "/damage",
         "регистрация": "/registration",
@@ -277,6 +281,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await try_handle_damage_step(_damage, user_id, chat_id, t, msg):
         return
     if await try_handle_sborka_step(_sborka, user_id, chat_id, t, msg):
+        return
+    if await try_handle_soberi_step(_soberi, user_id, chat_id, t, msg):
         return
 
     # 2) Команды
@@ -309,9 +315,19 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_sborka(_sborka, user_id, chat_id, username, cmd=t.lstrip("/"))
         return
+    if t == "/soberi":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_soberi(_soberi, user_id, chat_id, username)
+        return
+    if t == "/soberi_belka":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_soberi_belka(_soberi, user_id, chat_id, username)
+        return
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /soberi, /soberi_belka")
 async def _polling_loop() -> None:
     marker: Optional[int] = None
     logging.info("MAX polling started")

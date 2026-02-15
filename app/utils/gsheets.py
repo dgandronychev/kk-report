@@ -168,7 +168,29 @@ async def load_sborka_reference_data() -> dict:
         },
     }
 
+def get_max_nomer_sborka() -> int:
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()[1:]
+    numbers: list[int] = []
+    for row in rows:
+        if len(row) > 13 and row[13]:
+            num = re.sub(r"[^0-9]", "", str(row[13]))
+            if num:
+                numbers.append(int(num))
+    return max(numbers) if numbers else 0
 
+
+def write_soberi_in_google_sheets_rows(rows: list[list[str]]) -> None:
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    ws.append_rows(
+        rows,
+        value_input_option="USER_ENTERED",
+        table_range="A1",
+        insert_data_option="INSERT_ROWS",
+    )
+    
 def write_soberi_in_google_sheets(tlist: list) -> None:
     sh = _open_sklad_sheet()
     ws = sh.worksheet("Заявка на сборку")
@@ -361,7 +383,7 @@ def update_record_sborka(company, username, radius, razmer, marka_rez, model_rez
 
     if updates:
         ws.batch_update(updates)
-        
+
 async def load_damage_reference_data() -> dict:
     """Загружает справочники для сценария /damage из Google Sheets."""
     gc: Client = gspread.service_account("app/creds.json")
