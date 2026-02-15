@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 import requests
 
-from app.config import URL_REGISTRASHION
+from app.config import URL_GET_FIO, URL_REGISTRASHION
 
 
 def normalize_phone(s: str) -> Optional[str]:
@@ -88,3 +88,58 @@ async def post_registration_async(
         parsed = None
 
     return _extract_registration_error(r.status_code, r.text, parsed)
+
+def _extract_fio_from_payload(payload: object) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+
+    user_obj = payload.get("user")
+    if isinstance(user_obj, dict):
+        fullname = user_obj.get("fullname")
+        if isinstance(fullname, str) and fullname.strip():
+            return fullname.strip()
+
+    for key in ("fullname", "fio"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
+def _fallback_fio(msg: dict, user_id: int) -> str:
+    sender = msg.get("sender") if isinstance(msg, dict) else None
+    if isinstance(sender, dict):
+        first_name = str(sender.get("first_name") or "").strip()
+        last_name = str(sender.get("last_name") or "").strip()
+        fio = f"{last_name} {first_name}".strip()
+        if fio:
+            return fio
+
+        username = str(sender.get("username") or "").strip()
+        if username:
+            return f"@{username}" if not username.startswith("@") else username
+
+    return str(user_id)
+
+
+async def get_fio_async(max_chat_id: int, user_id: int, msg: Optional[dict] = None) -> str:
+    if not URL_GET_FIO:
+        return _fallback_fio(msg or {}, user_id)
+
+    fallback = _fallback_fio(msg or {}, user_id)
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(URL_GET_FIO, params={"chat_id": str(max_chat_id)})
+
+        response.raise_for_status()
+        parsed = response.json()
+
+        fio = _extract_fio_from_payload(parsed)
+        if fio:
+            return fio
+    except Exception:
+        return fallback
+
+    return fallback

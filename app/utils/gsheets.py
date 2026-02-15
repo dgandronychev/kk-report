@@ -91,3 +91,9 @@ def find_logistics_rows_shift(now: Optional[datetime] = None) -> List[Tuple[str,
                 result.append((direction, fio, tag))
 
     return result
+
+def write_in_answers_ras_shift(tlist: list, page: str = "Лист1") -> None:
+    gc: Client = gspread.service_account("app/creds.json")
+    sh = gc.open_by_url(URL_GOOGLE_SHEETS_CHART)
+    ws = sh.worksheet(page)
+    ws.append_row(tlist, value_input_option="RAW")

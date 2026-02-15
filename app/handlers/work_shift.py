@@ -8,6 +8,8 @@ from pprint import pformat
 from typing import Dict, List, Optional, Set
 from app.config import WORK_SHIFT_CHAT_ID
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
+from app.utils.gsheets import write_in_answers_ras_shift
+from app.utils.helper import get_fio_async
 
 logger = logging.getLogger(__name__)
 
@@ -54,15 +56,6 @@ def _extract_user_label(msg: dict, user_id: int) -> str:
     if isinstance(username, str) and username.startswith("@"):
         return username
     return f"@{username}"
-
-
-def _extract_fio(msg: dict) -> str:
-    sender = msg.get("sender") or {}
-    first_name = str(sender.get("first_name") or "").strip()
-    last_name = str(sender.get("last_name") or "").strip()
-    fio = f"{last_name} {first_name}".strip()
-    return fio or "Не указано"
-
 
 def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
     attachments = msg.get("attachments")
@@ -147,12 +140,23 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
         await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
-    fio = _extract_fio(msg)
+    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     username = _extract_user_label(msg, user_id)
     report = _caption(action, fio, username)
     report = f"{report}\n📎 Вложений: {len(files)}"
 
-    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
+    response = await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
+
+    timestamp = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+    message_ref = ""
+    if isinstance(response, dict):
+        message_ref = str(response.get("message_id") or response.get("id") or "")
+
+    try:
+        write_in_answers_ras_shift([timestamp, fio, action, username, message_ref], "Лист1")
+    except Exception:
+        logger.exception("Failed to write work shift report to Google Sheets")
+
     await send_text(chat_id, "Ваша заявка сформирована")
 
     _clear_flow(st, user_id, chat_id)
