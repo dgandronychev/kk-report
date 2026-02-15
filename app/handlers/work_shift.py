@@ -173,6 +173,7 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
         user_id,
         len(files),
     )
+
     _clear_flow(st, user_id, chat_id)
     return True
 
@@ -225,6 +226,17 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
         sorted(normalized_candidates),
         _safe_dump(callback_data),
     )
+
+    if user_id != flow_user_id:
+        logger.info(
+            "work_shift foreign event ignored chat_id=%s user_id=%s flow_user_id=%s text=%r",
+            chat_id,
+            user_id,
+            flow_user_id,
+            text,
+        )
+        return True
+
     if normalized_candidates & {"выход", "work_shift_exit"}:
         logger.info(
             "work_shift exit requested chat_id=%s user_id=%s flow_user_id=%s",
@@ -291,6 +303,7 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
             )
             await send_text(chat_id, f"Этот файл уже добавлен. Текущее количество: {len(files)}")
         return True
+
     logger.warning(
         "work_shift fallback prompt chat_id=%s user_id=%s flow_user_id=%s text=%r candidates=%s callback=%s msg_keys=%s msg=%s",
         chat_id,
