@@ -25,6 +25,7 @@ from app.handlers import work_shift
 from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
 from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step
 from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step
+from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ _shift = work_shift.WorkShiftState()
 _damage = DamageState()
 _sborka = SborkaState()
 _soberi = SoberiState()
+_nomenclature = NomenclatureState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -284,6 +286,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
     if await try_handle_soberi_step(_soberi, user_id, chat_id, t, msg):
         return
+    if await try_handle_nomenclature_step(_nomenclature, user_id, chat_id, t, msg):
+        return
 
     # 2) Команды
     if not t:
@@ -325,9 +329,20 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_soberi_belka(_soberi, user_id, chat_id, username)
         return
+    if t == "/check":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_sborka(_sborka, user_id, chat_id, username, cmd="check")
+        return
+    if t == "/nomenclature":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_nomenclature(_nomenclature, user_id, chat_id, username)
+        return
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /soberi, /soberi_belka")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /soberi_belka, /nomenclature")
+
 async def _polling_loop() -> None:
     marker: Optional[int] = None
     logging.info("MAX polling started")

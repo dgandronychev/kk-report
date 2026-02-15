@@ -147,6 +147,18 @@ def loading_bz_znaniya(company: str) -> list[list[str]]:
     sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
     return sh_main.worksheet(company).get_all_values()[1:]
 
+async def load_nomenclature_reference_data() -> dict:
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+
+    def _sheet_values(title: str) -> list[list[str]]:
+        return sh_main.worksheet(title).get_all_values()[1:]
+
+    return {
+        "city": _sheet_values("Резина Сити"),
+        "yandex": _sheet_values("Резина ЯД"),
+        "belka": _sheet_values("Резина Белка"),
+    }
 
 async def load_sborka_reference_data() -> dict:
     gc: Client = gspread.service_account("app/creds.json")
@@ -190,7 +202,7 @@ def write_soberi_in_google_sheets_rows(rows: list[list[str]]) -> None:
         table_range="A1",
         insert_data_option="INSERT_ROWS",
     )
-    
+
 def write_soberi_in_google_sheets(tlist: list) -> None:
     sh = _open_sklad_sheet()
     ws = sh.worksheet("Заявка на сборку")
@@ -420,6 +432,32 @@ def write_in_answers_ras(tlist: list, name_sheet: str, max_attempts: int = 3, ba
                 table_range="A1",
                 insert_data_option="INSERT_ROWS",
             )
+            return
+        except APIError as e:
+            last_error = e
+            if attempt == max_attempts:
+                raise
+            import time as _time
+            _time.sleep(base_delay * attempt)
+        except Exception as e:
+            last_error = e
+            if attempt == max_attempts:
+                raise
+            import time as _time
+            _time.sleep(base_delay * attempt)
+
+    if last_error:
+        raise last_error
+
+def write_in_answers_ras_nomen(tlist: list, name_sheet: str, max_attempts: int = 3, base_delay: float = 1.0) -> None:
+    """Запись в основной файл номенклатуры (листы Резина Сити/ЯД/Белка)."""
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            gc: Client = gspread.service_account("app/creds.json")
+            sh = gc.open_by_url(GSPREAD_URL_MAIN)
+            ws = sh.worksheet(name_sheet)
+            ws.append_row(tlist, value_input_option="USER_ENTERED")
             return
         except APIError as e:
             last_error = e

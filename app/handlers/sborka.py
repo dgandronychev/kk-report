@@ -48,6 +48,7 @@ class SborkaState:
 _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
 _KEY_TYPE_DISK = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
 _KEY_TYPE_SBORKA = ["Комплект", "Ось"]
+_KEY_TYPE_CHECK = ["Левое колесо", "Правое колесо", "Ось", "Комплект"]
 _KEY_SIDE = ["Левое", "Правое"]
 _KEY_ZAYAVKA = ["Да", "Нет"]
 
@@ -206,6 +207,10 @@ def _render_report(data: dict, fio: str, username: str) -> str:
 
 async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str, cmd: str = "sborka") -> None:
     await _ensure_refs_loaded()
+    if cmd == "check":
+        st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": "sborka", "type": "check"})
+        await _ask(chat_id, "Компания:", _KEY_COMPANY)
+        return
     st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": cmd, "type": "sborka"})
     await _ask(chat_id, "Компания:", _KEY_COMPANY)
 
@@ -250,6 +255,36 @@ def _write_sborka_rows(data: dict, message_ref: str, username: str) -> None:
             write_in_answers_ras(row, "Выгрузка сборка")
             write_in_answers_ras(row, "Онлайн остатки Хаба")
 
+def _write_check_rows(data: dict, username: str) -> None:
+    count = 1
+    if data.get("type_check") == "Ось":
+        count = 2
+    elif data.get("type_check") == "Комплект":
+        count = 4
+
+    row = [
+        (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
+        data["company"],
+        "Проверка колеса",
+        "",
+        data["marka_ts"],
+        data["radius"],
+        data["razmer"],
+        data["marka_rez"],
+        data["model_rez"],
+        data["sezon"],
+        data["type_disk"],
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        username,
+    ]
+    for _ in range(count):
+        write_in_answers_ras(row, "Выгрузка ремонты/утиль")
 
 async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> bool:
     flow = st.flows_by_user[user_id]
@@ -268,10 +303,12 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
         msg_ref = str(response.get("message_id") or response.get("id") or "")
 
     try:
-        if data.get("type") != "check":
+        if data.get("type") == "check":
+            _write_check_rows(data, username)
+        else:
             _write_sborka_rows(data, msg_ref, username)
     except Exception:
-        logger.exception("failed to write sborka rows")
+        logger.exception("failed to write sborka/check rows")
 
     if data.get("type_sborka") == "sborka":
         try:
@@ -326,6 +363,10 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask(chat_id, "Выберите компанию:", _KEY_COMPANY)
             return True
         flow.data["company"] = t
+        if flow.data.get("type") == "check":
+            flow.step = "marka_ts"
+            await _ask(chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
+            return True
         flow.step = "type_disk"
         await _ask(chat_id, "Тип диска:", _KEY_TYPE_DISK)
         return True
@@ -385,6 +426,10 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask(chat_id, "Выберите сезон:", options)
             return True
         flow.data["sezon"] = t
+        if flow.data.get("type") == "check":
+            flow.step = "zayavka"
+            await _ask(chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+            return True
         flow.step = "marka_ts"
         await _ask(chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
         return True
@@ -395,8 +440,24 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask(chat_id, "Выберите марку авто:", options[:40])
             return True
         flow.data["marka_ts"] = t
+        if flow.data.get("type") == "check":
+            flow.step = "type_check"
+            await _ask(chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
+            return True
         flow.step = "type_kolesa"
         await _ask(chat_id, "Вид сборки:", _KEY_TYPE_SBORKA)
+        return True
+
+    if step == "type_check":
+        if t not in _KEY_TYPE_CHECK:
+            await _ask(chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
+            return True
+        flow.data["type_check"] = t
+        base = t.split()[0]
+        flow.data["type_kolesa"] = base
+        flow.data["type_sborka"] = "sborka_ko" if base in ("Ось", "Комплект") else "sborka"
+        flow.step = "type_disk"
+        await _ask(chat_id, "Тип диска:", _KEY_TYPE_DISK)
         return True
 
     if step == "type_kolesa":
