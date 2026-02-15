@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-#
+import json
+from typing import Dict, List, Optional, Set
 from app.config import WORK_SHIFT_CHAT_ID
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
 
@@ -12,6 +12,7 @@ class WorkShiftState:
     wait_files_start: set[int] = field(default_factory=set)
     wait_files_end: set[int] = field(default_factory=set)
     files_by_user: Dict[int, List[dict]] = field(default_factory=dict)
+    seen_file_keys_by_user: Dict[int, Set[str]] = field(default_factory=dict)
     active_user_by_chat: Dict[int, int] = field(default_factory=dict)
 
 def _resolve_flow_user(st: WorkShiftState, user_id: int, chat_id: int) -> Optional[int]:
@@ -29,6 +30,7 @@ def _clear_flow(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_start.discard(user_id)
     st.wait_files_end.discard(user_id)
     st.files_by_user.pop(user_id, None)
+    st.seen_file_keys_by_user.pop(user_id, None)
     if st.active_user_by_chat.get(chat_id) == user_id:
         st.active_user_by_chat.pop(chat_id, None)
 
@@ -68,9 +70,18 @@ def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
         if not isinstance(item, dict):
             continue
         f_type = str(item.get("type") or "unknown")
+        if f_type not in {"image", "video", "file", "audio"}:
+            continue
         files.append({"type": f_type, "payload": item.get("payload")})
     return files
 
+def _attachment_key(item: dict) -> str:
+    payload = item.get("payload")
+    try:
+        payload_str = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        payload_str = str(payload)
+    return f"{item.get('type')}::{payload_str}"
 
 def _caption(action: str, fio: str, username: str) -> str:
     ts = datetime.now() + timedelta(hours=3)
@@ -98,6 +109,7 @@ async def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) ->
     st.wait_files_end.discard(user_id)
     st.wait_files_start.add(user_id)
     st.files_by_user[user_id] = []
+    st.seen_file_keys_by_user[user_id] = set()
     st.active_user_by_chat[chat_id] = user_id
     await _send_work_shift_prompt(chat_id)
 
@@ -109,6 +121,7 @@ async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> 
     st.wait_files_start.discard(user_id)
     st.wait_files_end.add(user_id)
     st.files_by_user[user_id] = []
+    st.seen_file_keys_by_user[user_id] = set()
     st.active_user_by_chat[chat_id] = user_id
     await _send_work_shift_prompt(chat_id)
 
@@ -134,7 +147,6 @@ def _normalize_control_text(text: str) -> str:
     normalized = text.strip().strip("«»\"'").lower()
     return normalized
 
-
 async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     flow_user_id = _resolve_flow_user(st, user_id, chat_id)
     if flow_user_id is None:
@@ -156,11 +168,23 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
 
     is_callback_event = isinstance(msg.get("callback"), dict)
     attachments = _extract_attachments(msg, include_nested=not is_callback_event)
-
     if attachments:
         files = st.files_by_user.setdefault(flow_user_id, [])
-        files.extend(attachments)
-        await send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
+        seen_keys = st.seen_file_keys_by_user.setdefault(flow_user_id, set())
+
+        new_files: List[dict] = []
+        for attachment in attachments:
+            key = _attachment_key(attachment)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            new_files.append(attachment)
+
+        if new_files:
+            files.extend(new_files)
+            await send_text(chat_id, f"Файлов добавлено: {len(new_files)}. Текущее количество: {len(files)}")
+        else:
+            await send_text(chat_id, f"Этот файл уже добавлен. Текущее количество: {len(files)}")
         return True
 
     await _send_work_shift_prompt(chat_id)
