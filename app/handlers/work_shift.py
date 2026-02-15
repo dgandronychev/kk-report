@@ -146,6 +146,27 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
 def _normalize_control_text(text: str) -> str:
     normalized = text.strip().strip("«»\"'").lower()
     return normalized
+def _control_text_candidates(text: str, msg: dict) -> List[str]:
+    candidates: List[str] = [text]
+
+    callback = msg.get("callback")
+    if not isinstance(callback, dict):
+        return candidates
+
+    nodes: List[object] = [callback]
+    callback_payload = callback.get("payload")
+    if isinstance(callback_payload, dict):
+        nodes.append(callback_payload)
+
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        for key in ("payload", "data", "value", "command", "action", "text"):
+            value = node.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value)
+
+    return candidates
 
 async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     flow_user_id = _resolve_flow_user(st, user_id, chat_id)
@@ -153,15 +174,17 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
         return False
 
     is_start_flow = flow_user_id in st.wait_files_start
-    clean_text = text.strip()
-    normalized_text = _normalize_control_text(clean_text)
-
-    if normalized_text in {"выход", "work_shift_exit"}:
+    normalized_candidates = {
+        _normalize_control_text(candidate)
+        for candidate in _control_text_candidates(text, msg)
+        if candidate.strip()
+    }
+    if normalized_candidates & {"выход", "work_shift_exit"}:
         _clear_flow(st, flow_user_id, chat_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
-    if normalized_text in {"готово", "work_shift_done"}:
+    if normalized_candidates & {"готово", "work_shift_done"}:
         if is_start_flow:
             return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
         return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
