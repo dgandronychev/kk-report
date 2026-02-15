@@ -6,7 +6,7 @@ from typing import Dict
 
 from app.config import NOMENCLATURE_ALLOWED_USER_IDS
 from app.utils.gsheets import load_nomenclature_reference_data, write_in_answers_ras_nomen
-from app.utils.max_api import send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, send_text, send_text_with_reply_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +71,18 @@ def _column_values(company: str, idx: int) -> list[str]:
     return sorted(set(vals))
 
 
-async def _ask(chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
+async def _ask(flow: NomenclatureFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
     button_texts = options + (["Назад"] if include_back else []) + ["Выход"]
     payloads = options + (["nomenclature_back"] if include_back else []) + ["nomenclature_exit"]
-    await send_text_with_reply_buttons(chat_id, text, button_texts=button_texts, button_payloads=payloads)
+
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(chat_id, text, button_texts=button_texts, button_payloads=payloads)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 
 def _clear(st: NomenclatureState, user_id: int) -> None:
@@ -88,7 +96,7 @@ async def cmd_nomenclature(st: NomenclatureState, user_id: int, chat_id: int, us
 
     await _ensure_refs_loaded()
     st.flows_by_user[user_id] = NomenclatureFlow(step="company", data={"username": username})
-    await _ask(chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
 
 
 def _save(data: dict) -> None:
@@ -123,6 +131,9 @@ async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat
 
     controls = _control_candidates(text, msg)
     if controls & {"выход", "nomenclature_exit"}:
+        prompt_msg_id = flow.data.get("prompt_msg_id")
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear(st, user_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
@@ -134,64 +145,67 @@ async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat
     if controls & {"назад", "nomenclature_back"}:
         if step == "radius":
             flow.step = "company"
-            await _ask(chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+            await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
         elif step == "razmer":
             flow.step = "radius"
-            await _ask(chat_id, "Введите радиус:", _KEY_RADIUS)
+            await _ask(flow, chat_id, "Введите радиус:", _KEY_RADIUS)
         elif step == "marka":
             flow.step = "razmer"
-            await _ask(chat_id, "Введите размер:", _column_values(data["company"], 2))
+            await _ask(flow, chat_id, "Введите размер:", _column_values(data["company"], 2))
         elif step == "model":
             flow.step = "marka"
-            await _ask(chat_id, "Введите марку резины:", _column_values(data["company"], 4))
+            await _ask(flow, chat_id, "Введите марку резины:", _column_values(data["company"], 4))
         elif step == "sezon":
             flow.step = "model"
-            await _ask(chat_id, "Введите модель резины:", [], include_back=True)
+            await _ask(flow, chat_id, "Введите модель резины:", [], include_back=True)
         elif step == "al":
             flow.step = "sezon"
-            await _ask(chat_id, "Введите сезонность резины:", _column_values(data["company"], 3))
+            await _ask(flow, chat_id, "Введите сезонность резины:", _column_values(data["company"], 3))
         return True
 
     if step == "company":
         if t not in _KEY_COMPANY:
-            await _ask(chat_id, "Выберите компанию:", _KEY_COMPANY, include_back=False)
+            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY, include_back=False)
             return True
         data["company"] = t
         flow.step = "radius"
-        await _ask(chat_id, "Введите радиус:", _KEY_RADIUS)
+        await _ask(flow, chat_id, "Введите радиус:", _KEY_RADIUS)
         return True
 
     if step == "radius":
         data["radius"] = t
         flow.step = "razmer"
-        await _ask(chat_id, "Введите размер:", _column_values(data["company"], 2))
+        await _ask(flow, chat_id, "Введите размер:", _column_values(data["company"], 2))
         return True
 
     if step == "razmer":
         data["razmer"] = t
         flow.step = "marka"
-        await _ask(chat_id, "Введите марку резины:", _column_values(data["company"], 4))
+        await _ask(flow, chat_id, "Введите марку резины:", _column_values(data["company"], 4))
         return True
 
     if step == "marka":
         data["marka"] = t
         flow.step = "model"
-        await _ask(chat_id, "Введите модель резины:", [], include_back=True)
+        await _ask(flow, chat_id, "Введите модель резины:", [], include_back=True)
         return True
 
     if step == "model":
         data["model"] = t
         flow.step = "sezon"
-        await _ask(chat_id, "Введите сезонность резины:", _column_values(data["company"], 3))
+        await _ask(flow, chat_id, "Введите сезонность резины:", _column_values(data["company"], 3))
         return True
 
     if step == "sezon":
         data["sezon"] = t
         if data["company"] == "СитиДрайв":
             flow.step = "al"
-            await _ask(chat_id, "Введите АЛ:", [], include_back=True)
+            await _ask(flow, chat_id, "Введите АЛ:", [], include_back=True)
             return True
         _save(data)
+        prompt_msg_id = flow.data.get("prompt_msg_id")
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear(st, user_id)
         await send_text(chat_id, "Добавление новой номенклатуры выполнено")
         return True
@@ -199,6 +213,9 @@ async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat
     if step == "al":
         data["al"] = t
         _save(data)
+        prompt_msg_id = flow.data.get("prompt_msg_id")
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear(st, user_id)
         await send_text(chat_id, "Добавление новой номенклатуры выполнено")
         return True

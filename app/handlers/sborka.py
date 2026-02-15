@@ -8,7 +8,7 @@ from typing import Dict, List, Set
 
 from app.config import SBORKA_CHAT_ID_BELKA, SBORKA_CHAT_ID_CITY, SBORKA_CHAT_ID_YANDEX
 from app.utils.helper import get_fio_async
-from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 from app.utils.gsheets import (
     load_sborka_reference_data,
     nomer_sborka,
@@ -73,15 +73,21 @@ def _kb_control() -> tuple[list[str], list[str]]:
     return ["Назад", "Выход"], ["sborka_back", "sborka_exit"]
 
 
-async def _ask(chat_id: int, text: str, options: list[str]) -> None:
+async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str]) -> None:
     buttons, payloads = _kb_control()
-    await send_text_with_reply_buttons(
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text=text,
         button_texts=options + buttons,
         button_payloads=options + payloads,
     )
-
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
@@ -209,10 +215,10 @@ async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str,
     await _ensure_refs_loaded()
     if cmd == "check":
         st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": "sborka", "type": "check"})
-        await _ask(chat_id, "Компания:", _KEY_COMPANY)
+        await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY)
         return
     st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": cmd, "type": "sborka"})
-    await _ask(chat_id, "Компания:", _KEY_COMPANY)
+    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY)
 
 
 def _clear(st: SborkaState, user_id: int) -> None:
@@ -335,8 +341,108 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
         except Exception:
             logger.exception("failed update_record_sborka")
 
+    prompt_msg_id = flow.data.get("prompt_msg_id")
+    if prompt_msg_id:
+        await delete_message(chat_id, prompt_msg_id)
     _clear(st, user_id)
     await send_text(chat_id, "Ваша заявка сформирована")
+    return True
+
+async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
+    step = flow.step
+    company = flow.data.get("company", "")
+
+    if step == "company":
+        return True
+
+    if step == "type_disk":
+        if flow.data.get("type") == "check":
+            flow.step = "type_check"
+            await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
+            return True
+        flow.step = "company"
+        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+        return True
+
+    if step == "radius":
+        if flow.data.get("type") == "check":
+            flow.step = "type_disk"
+            await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
+            return True
+        flow.step = "type_disk"
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        return True
+
+    if step == "razmer":
+        flow.step = "radius"
+        await _ask(flow, chat_id, "Радиус:", _list_radius(company))
+        return True
+
+    if step == "marka":
+        flow.step = "razmer"
+        await _ask(flow, chat_id, "Размер:", _filter_values(company, radius=flow.data.get("radius", ""), field=GHRezina.RAZMER))
+        return True
+
+    if step == "model":
+        flow.step = "marka"
+        await _ask(flow, chat_id, "Марка резины:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), field=GHRezina.MARKA))
+        return True
+
+    if step == "sezon":
+        flow.step = "model"
+        await _ask(flow, chat_id, "Модель резины:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), field=GHRezina.MODEL))
+        return True
+
+    if step == "marka_ts":
+        if flow.data.get("type") == "check":
+            flow.step = "company"
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            return True
+        flow.step = "sezon"
+        await _ask(flow, chat_id, "Сезон:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""), field=GHRezina.SEZON))
+        return True
+
+    if step == "type_check":
+        flow.step = "marka_ts"
+        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(company)[:40])
+        return True
+
+    if step == "type_kolesa":
+        flow.step = "marka_ts"
+        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(company)[:40])
+        return True
+
+    if step == "zayavka":
+        if flow.data.get("type") == "check":
+            flow.step = "sezon"
+            await _ask(flow, chat_id, "Сезон:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""), field=GHRezina.SEZON))
+            return True
+        flow.step = "type_kolesa"
+        await _ask(flow, chat_id, "Вид сборки:", _KEY_TYPE_SBORKA + _KEY_SIDE)
+        return True
+
+    if step == "nomer":
+        flow.step = "zayavka"
+        await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+        return True
+
+    if step == "files":
+        flow.step = "nomer"
+        candidates = nomer_sborka(
+            flow.data["company"], flow.data["radius"], flow.data["razmer"], flow.data["marka_rez"],
+            flow.data["model_rez"], flow.data["sezon"], flow.data["marka_ts"], flow.data["type_disk"], flow.data["type_kolesa"]
+        )
+        if flow.data.get("type_sborka") == "sborka_ko":
+            candidates = nomer_sborka_ko(
+                flow.data["company"], flow.data["radius"], flow.data["razmer"], flow.data["marka_rez"],
+                flow.data["model_rez"], flow.data["sezon"], flow.data["marka_ts"], flow.data["type_disk"], flow.data["type_kolesa"]
+            )
+        if candidates:
+            await _ask(flow, chat_id, "Номер заявки:", sorted(set(candidates))[:50])
+        else:
+            await send_text(chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
+        return True
+
     return True
 
 
@@ -347,77 +453,79 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
 
     controls = _control_candidates(text, msg)
     if controls & {"выход", "sborka_exit"}:
+        prompt_msg_id = flow.data.get("prompt_msg_id")
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear(st, user_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
     if controls & {"назад", "sborka_back"}:
-        await send_text(chat_id, "Используйте /sborka для перезапуска анкеты")
-        return True
+        return await _handle_back(flow, chat_id)
 
     step = flow.step
     t = text.strip()
 
     if step == "company":
         if t not in _KEY_COMPANY:
-            await _ask(chat_id, "Выберите компанию:", _KEY_COMPANY)
+            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY)
             return True
         flow.data["company"] = t
         if flow.data.get("type") == "check":
             flow.step = "marka_ts"
-            await _ask(chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
+            await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
             return True
         flow.step = "type_disk"
-        await _ask(chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
         return True
 
     if step == "type_disk":
         if t not in _KEY_TYPE_DISK:
-            await _ask(chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
+            await _ask(flow, chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
             return True
         flow.data["type_disk"] = t
         flow.step = "radius"
-        await _ask(chat_id, "Радиус:", _list_radius(flow.data["company"]))
+        await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         return True
 
     if step == "radius":
         options = _list_radius(flow.data["company"])
         if t not in options:
-            await _ask(chat_id, "Выберите радиус:", options)
+            await _askflow, (chat_id, "Выберите радиус:", options)
             return True
         flow.data["radius"] = t
         flow.step = "razmer"
-        await _ask(chat_id, "Размер:", _filter_values(flow.data["company"], radius=t, field=GHRezina.RAZMER))
+        await _ask(flow, chat_id, "Размер:", _filter_values(flow.data["company"], radius=t, field=GHRezina.RAZMER))
         return True
 
     if step == "razmer":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], field=GHRezina.RAZMER)
         if t not in options:
-            await _ask(chat_id, "Выберите размер:", options)
+            await _ask(flow, chat_id, "Выберите размер:", options)
             return True
         flow.data["razmer"] = t
         flow.step = "marka"
-        await _ask(chat_id, "Марка резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=t, field=GHRezina.MARKA))
+        await _ask(flow, chat_id, "Марка резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=t, field=GHRezina.MARKA))
         return True
 
     if step == "marka":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], field=GHRezina.MARKA)
         if t not in options:
-            await _ask(chat_id, "Выберите марку резины:", options)
+            await _ask(flow, chat_id, "Выберите марку резины:", options)
             return True
         flow.data["marka_rez"] = t
         flow.step = "model"
-        await _ask(chat_id, "Модель резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=t, field=GHRezina.MODEL))
+        await _ask(flow, chat_id, "Модель резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=t, field=GHRezina.MODEL))
         return True
 
     if step == "model":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], field=GHRezina.MODEL)
         if t not in options:
-            await _ask(chat_id, "Выберите модель резины:", options)
+            await _ask(flow, chat_id, "Выберите модель резины:", options)
             return True
         flow.data["model_rez"] = t
         flow.step = "sezon"
-        await _ask(chat_id, "Сезон:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=t, field=GHRezina.SEZON))
+        await _ask(flow, chat_id, "Сезон:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=t, field=GHRezina.SEZON))
         return True
 
     if step == "sezon":
@@ -428,51 +536,51 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
         flow.data["sezon"] = t
         if flow.data.get("type") == "check":
             flow.step = "zayavka"
-            await _ask(chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+            await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
             return True
         flow.step = "marka_ts"
-        await _ask(chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
+        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
         return True
 
     if step == "marka_ts":
         options = _list_marka_ts(flow.data["company"])
         if t not in options:
-            await _ask(chat_id, "Выберите марку авто:", options[:40])
+            await _ask(flow, chat_id, "Выберите марку авто:", options[:40])
             return True
         flow.data["marka_ts"] = t
         if flow.data.get("type") == "check":
             flow.step = "type_check"
-            await _ask(chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
+            await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
             return True
         flow.step = "type_kolesa"
-        await _ask(chat_id, "Вид сборки:", _KEY_TYPE_SBORKA)
+        await _ask(flow, chat_id, "Вид сборки:", _KEY_TYPE_SBORKA)
         return True
 
     if step == "type_check":
         if t not in _KEY_TYPE_CHECK:
-            await _ask(chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
+            await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
             return True
         flow.data["type_check"] = t
         base = t.split()[0]
         flow.data["type_kolesa"] = base
         flow.data["type_sborka"] = "sborka_ko" if base in ("Ось", "Комплект") else "sborka"
         flow.step = "type_disk"
-        await _ask(chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
         return True
 
     if step == "type_kolesa":
         options = _KEY_TYPE_SBORKA + _KEY_SIDE
         if t not in options:
-            await _ask(chat_id, "Выберите вид сборки:", options)
+            await _ask(flow, chat_id, "Выберите вид сборки:", options)
             return True
         flow.data["type_kolesa"] = t
         flow.step = "zayavka"
-        await _ask(chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+        await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
         return True
 
     if step == "zayavka":
         if t not in _KEY_ZAYAVKA:
-            await _ask(chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+            await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
             return True
         flow.data["zayavka"] = t
         flow.step = "nomer"
@@ -486,7 +594,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
                 flow.data["model_rez"], flow.data["sezon"], flow.data["marka_ts"], flow.data["type_disk"], flow.data["type_kolesa"]
             )
         if candidates:
-            await _ask(chat_id, "Номер заявки:", sorted(set(candidates))[:50])
+            await _ask(flow, chat_id, "Номер заявки:", sorted(set(candidates))[:50])
         else:
             await send_text(chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
         return True
@@ -494,12 +602,18 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
     if step == "nomer":
         flow.data["nomer_sborka"] = t or "не найден"
         flow.step = "files"
-        await send_text_with_reply_buttons(
-            chat_id,
+        prev_msg_id = flow.data.get("prompt_msg_id")
+        if prev_msg_id:
+            await delete_message(chat_id, prev_msg_id)
+        response = await send_text_with_reply_buttons(
+           chat_id,
             "Прикрепите фото/видео/файл и нажмите «Готово».",
             ["Готово", "Выход"],
             ["sborka_done", "sborka_exit"],
         )
+        msg_id = extract_message_id(response)
+        if msg_id:
+            flow.data["prompt_msg_id"] = msg_id
         return True
 
     if step == "files":
@@ -519,12 +633,17 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await send_text(chat_id, f"Файлов добавлено: {new_items}. Текущее количество: {len(flow.files)}")
             return True
 
-        await send_text_with_reply_buttons(
-            chat_id,
+        prev_msg_id = flow.data.get("prompt_msg_id")
+        if prev_msg_id:
+            await delete_message(chat_id, prev_msg_id)
+        response = await send_text_with_reply_buttons(            chat_id,
             "Прикрепите файлы и нажмите «Готово».",
             ["Готово", "Выход"],
             ["sborka_done", "sborka_exit"],
         )
+        msg_id = extract_message_id(response)
+        if msg_id:
+            flow.data["prompt_msg_id"] = msg_id
         return True
 
     return True

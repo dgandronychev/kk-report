@@ -51,7 +51,7 @@ async def send_text_with_reply_buttons(
     text: str,
     button_texts: list[str],
     button_payloads: Optional[list[str]] = None,
-) -> None:
+) -> Optional[dict]:
     if button_payloads is not None and len(button_payloads) != len(button_texts):
         raise ValueError("button_payloads length should match button_texts length")
 
@@ -63,7 +63,7 @@ async def send_text_with_reply_buttons(
         )
 
     try:
-        await send_message(
+        return await send_message(
             chat_id=chat_id,
             text=text,
             extra_payload={
@@ -78,7 +78,7 @@ async def send_text_with_reply_buttons(
     except Exception:
         logger.exception("[MAX API] failed to send inline keyboard")
         await send_text(chat_id=chat_id, text=text)
-
+        return None
 
 async def send_message(
     chat_id: int,
@@ -118,6 +118,39 @@ async def send_message(
     r.raise_for_status()
     return r.json()
 
+def extract_message_id(payload: Optional[dict]) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("message_id", "id", "mid"):  # variants in API payloads
+        value = payload.get(key)
+        if value is not None:
+            return str(value)
+    result = payload.get("result")
+    if isinstance(result, list) and result and isinstance(result[0], dict):
+        for key in ("message_id", "id", "mid"):
+            value = result[0].get(key)
+            if value is not None:
+                return str(value)
+    return None
+
+
+async def delete_message(chat_id: int, message_id: str | int) -> bool:
+    mid = str(message_id)
+    candidates = [
+        (f"{API_BASE}/messages/{mid}", {"chat_id": chat_id}),
+        (f"{API_BASE}/messages", {"chat_id": chat_id, "message_id": mid}),
+    ]
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        for url, params in candidates:
+            try:
+                r = await client.delete(url, headers=HEADERS, params=params)
+                if r.is_success:
+                    return True
+            except Exception:
+                logger.exception("[MAX API] delete message failed | url=%s", url)
+
+    return False
 
 async def upload_image_to_max(file_bytes: bytes, filename: str = "image.jpg") -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
