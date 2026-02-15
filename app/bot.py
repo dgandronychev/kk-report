@@ -331,6 +331,9 @@ def run() -> None:
     logger.setLevel(logging.INFO)
     logger.addHandler(file_handler)
 
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(logging.INFO)
     stream_handler.setFormatter(fmt)

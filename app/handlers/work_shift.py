@@ -48,14 +48,14 @@ def _extract_fio(msg: dict) -> str:
     return fio or "Не указано"
 
 
-def _extract_attachments(msg: dict) -> List[dict]:
+def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
     attachments = msg.get("attachments")
-    if not isinstance(attachments, list):
+    if include_nested and not isinstance(attachments, list):
         body = msg.get("body")
         if isinstance(body, dict):
             attachments = body.get("attachments")
 
-    if not isinstance(attachments, list):
+    if include_nested and not isinstance(attachments, list):
         payload = msg.get("payload")
         if isinstance(payload, dict):
             attachments = payload.get("attachments")
@@ -130,6 +130,10 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
     _clear_flow(st, user_id, chat_id)
     return True
 
+def _normalize_control_text(text: str) -> str:
+    normalized = text.strip().strip("«»\"'").lower()
+    return normalized
+
 
 async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     flow_user_id = _resolve_flow_user(st, user_id, chat_id)
@@ -138,18 +142,21 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
 
     is_start_flow = flow_user_id in st.wait_files_start
     clean_text = text.strip()
+    normalized_text = _normalize_control_text(clean_text)
 
-    if clean_text in {"Выход", "work_shift_exit"}:
+    if normalized_text in {"выход", "work_shift_exit"}:
         _clear_flow(st, flow_user_id, chat_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
-    if clean_text in {"Готово", "work_shift_done"}:
+    if normalized_text in {"готово", "work_shift_done"}:
         if is_start_flow:
             return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
         return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
 
-    attachments = _extract_attachments(msg)
+    is_callback_event = isinstance(msg.get("callback"), dict)
+    attachments = _extract_attachments(msg, include_nested=not is_callback_event)
+
     if attachments:
         files = st.files_by_user.setdefault(flow_user_id, [])
         files.extend(attachments)
