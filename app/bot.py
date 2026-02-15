@@ -147,6 +147,10 @@ def _sender_id(msg: dict) -> Optional[int]:
     if not isinstance(sender, dict):
         sender = {}
 
+    callback = msg.get("callback")
+    if not isinstance(callback, dict):
+        callback = {}
+
     def _to_int(value: object) -> Optional[int]:
         if isinstance(value, int):
             return value
@@ -159,23 +163,19 @@ def _sender_id(msg: dict) -> Optional[int]:
                 return int(m.group(0))
         return None
 
-    for key in ("user_id", "id"):
-        uid = _to_int(sender.get(key))
+    for key in ("user_id", "sender_user_id", "from_user_id", "id"):
+        uid = _to_int(callback.get(key))
         if uid is not None:
             return uid
 
-    callback = msg.get("callback")
-    if isinstance(callback, dict):
-        for key in ("user_id", "sender_user_id", "from_user_id"):
-            uid = _to_int(callback.get(key))
-            if uid is not None:
-                return uid
 
     for node in (
+        callback.get("sender"),
+        callback.get("user"),
+        sender,
         sender.get("user"),
         (msg.get("body") or {}).get("sender") if isinstance(msg.get("body"), dict) else None,
         (msg.get("payload") or {}).get("sender") if isinstance(msg.get("payload"), dict) else None,
-        (msg.get("callback") or {}).get("sender") if isinstance(msg.get("callback"), dict) else None,
     ):
         if isinstance(node, dict):
             for key in ("user_id", "id", "sender_user_id", "from_user_id"):
