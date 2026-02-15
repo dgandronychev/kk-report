@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List
++from typing import Dict, List, Optional
 
 from app.config import WORK_SHIFT_CHAT_ID
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
@@ -13,7 +13,25 @@ class WorkShiftState:
     wait_files_start: set[int] = field(default_factory=set)
     wait_files_end: set[int] = field(default_factory=set)
     files_by_user: Dict[int, List[dict]] = field(default_factory=dict)
+    active_user_by_chat: Dict[int, int] = field(default_factory=dict)
 
+def _resolve_flow_user(st: WorkShiftState, user_id: int, chat_id: int) -> Optional[int]:
+    if user_id in st.wait_files_start or user_id in st.wait_files_end:
+        return user_id
+
+    mapped_user_id = st.active_user_by_chat.get(chat_id)
+    if mapped_user_id is None:
+        return None
+    if mapped_user_id in st.wait_files_start or mapped_user_id in st.wait_files_end:
+        return mapped_user_id
+    return None
+
+def _clear_flow(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+    st.wait_files_start.discard(user_id)
+    st.wait_files_end.discard(user_id)
+    st.files_by_user.pop(user_id, None)
+    if st.active_user_by_chat.get(chat_id) == user_id:
+        st.active_user_by_chat.pop(chat_id, None)
 
 def _extract_user_label(msg: dict, user_id: int) -> str:
     sender = msg.get("sender") or {}
@@ -75,16 +93,24 @@ async def _send_work_shift_prompt(chat_id: int) -> None:
 
 
 async def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+    old_user_id = st.active_user_by_chat.get(chat_id)
+    if old_user_id is not None and old_user_id != user_id:
+        _clear_flow(st, old_user_id, chat_id)
     st.wait_files_end.discard(user_id)
     st.wait_files_start.add(user_id)
     st.files_by_user[user_id] = []
+    st.active_user_by_chat[chat_id] = user_id
     await _send_work_shift_prompt(chat_id)
 
 
 async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+    old_user_id = st.active_user_by_chat.get(chat_id)
+    if old_user_id is not None and old_user_id != user_id:
+        _clear_flow(st, old_user_id, chat_id)
     st.wait_files_start.discard(user_id)
     st.wait_files_end.add(user_id)
     st.files_by_user[user_id] = []
+    st.active_user_by_chat[chat_id] = user_id
     await _send_work_shift_prompt(chat_id)
 
 
@@ -102,38 +128,34 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
     await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
     await send_text(chat_id, "Ваша заявка сформирована")
 
-    st.wait_files_start.discard(user_id)
-    st.wait_files_end.discard(user_id)
-    st.files_by_user.pop(user_id, None)
+    _clear_flow(st, user_id, chat_id)
     return True
 
 
 async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
-    is_start_flow = user_id in st.wait_files_start
-    is_end_flow = user_id in st.wait_files_end
-    if not is_start_flow and not is_end_flow:
+    flow_user_id = _resolve_flow_user(st, user_id, chat_id)
+    if flow_user_id is None:
         return False
 
+    is_start_flow = flow_user_id in st.wait_files_start
     clean_text = text.strip()
 
     if clean_text in {"Выход", "work_shift_exit"}:
-        st.wait_files_start.discard(user_id)
-        st.wait_files_end.discard(user_id)
-        st.files_by_user.pop(user_id, None)
+        _clear_flow(st, flow_user_id, chat_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
     attachments = _extract_attachments(msg)
     if attachments:
-        files = st.files_by_user.setdefault(user_id, [])
+        files = st.files_by_user.setdefault(flow_user_id, [])
         files.extend(attachments)
         await send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
         return True
 
     if clean_text in {"Готово", "work_shift_done"}:
         if is_start_flow:
-            return await _finalize(st, user_id, chat_id, msg, "Начало смены")
-        return await _finalize(st, user_id, chat_id, msg, "Окончание смены")
+            return await _finalize(st, flow_user_id, chat_id, msg, "Начало смены")
+        return await _finalize(st, flow_user_id, chat_id, msg, "Окончание смены")
 
     await _send_work_shift_prompt(chat_id)
     return True
