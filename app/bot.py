@@ -306,7 +306,13 @@ async def _polling_loop() -> None:
                 if user_id is None:
                     continue
 
-                if not text and not _has_attachments(msg):
+                # Callback events (inline keyboard buttons) can come without text
+                # and without attachments, so they still must reach the handlers.
+                if (
+                        not text
+                        and not _has_attachments(msg)
+                        and not isinstance(msg.get("callback"), dict)
+                ):
                     continue
 
                 try:
