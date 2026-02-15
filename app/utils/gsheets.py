@@ -1,9 +1,10 @@
 import logging
 import gspread
+import re
 from gspread import Client, Spreadsheet
 from typing import List, Tuple, Optional, Any
 from datetime import datetime, timedelta, time
-from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER
+from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD
 from gspread.exceptions import APIError
 
 EXCEL_EPOCH = datetime(1899, 12, 30)
@@ -136,6 +137,231 @@ def write_in_answers_ras_shift(
     if last_error:
         raise last_error
 
+def _open_sklad_sheet() -> Spreadsheet:
+    gc: Client = gspread.service_account("app/creds.json")
+    return gc.open_by_url(GSPREAD_URL_SKLAD)
+
+
+def loading_bz_znaniya(company: str) -> list[list[str]]:
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+    return sh_main.worksheet(company).get_all_values()[1:]
+
+
+async def load_sborka_reference_data() -> dict:
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+
+    def _sheet_values(title: str) -> list[list[str]]:
+        return sh_main.worksheet(title).get_all_values()[1:]
+
+    return {
+        "rezina": {
+            "city": _sheet_values("Резина Сити"),
+            "yandex": _sheet_values("Резина ЯД"),
+            "belka": _sheet_values("Резина Белка"),
+        },
+        "cars": {
+            "city": _sheet_values("Перечень ТС Сити"),
+            "yandex": _sheet_values("Перечень ТС Яд"),
+            "belka": _sheet_values("Перечень ТС Белка"),
+        },
+    }
+
+
+def write_soberi_in_google_sheets(tlist: list) -> None:
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    ws.append_row(
+        tlist,
+        value_input_option="USER_ENTERED",
+        table_range="A1",
+        insert_data_option="INSERT_ROWS",
+    )
+
+
+def get_record_sklad() -> list[list[str]]:
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()[1:]
+    out: list[list[str]] = []
+    for row in rows:
+        if len(row) > 15 and not row[15] and len(row) > 2 and row[2]:
+            out.append(row[3:14])
+    return out
+
+
+def nomer_sborka(company, radius, razmer, marka_rez, model_rez, sezon, marka_ts, type_disk, type_kolesa) -> list[str]:
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()
+    unique_numbers: set[str] = set()
+
+    for row in rows:
+        if len(row) < 14:
+            continue
+        if (
+            str(row[3]) == str(company)
+            and str(row[4]) == str(marka_ts)
+            and str(row[5]) == str(radius)
+            and str(row[6]) == str(razmer)
+            and str(row[7]) == str(marka_rez)
+            and str(row[8]) == str(model_rez)
+            and str(row[9]) == str(sezon)
+            and str(row[10]) == str(type_disk)
+            and str(row[11]) == str(type_kolesa)
+        ):
+            unique_numbers.add(str(row[13]))
+
+    for row in rows:
+        if len(row) < 14:
+            continue
+        if (
+            str(row[3]) == str(company)
+            and str(row[4]) == str(marka_ts)
+            and str(row[5]) == str(radius)
+            and str(row[6]) == str(razmer)
+            and str(row[9]) == str(sezon)
+            and str(row[11]) == str(type_kolesa)
+        ):
+            unique_numbers.add(str(row[13]))
+
+    return list(unique_numbers)
+
+
+def nomer_sborka_ko(company, radius, razmer, marka_rez, model_rez, sezon, marka_ts, type_disk, type_kolesa):
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()
+
+    komplekts = set()
+    axes: list[str] = []
+    matching_rows: list[list[str]] = []
+
+    for row in rows:
+        if len(row) < 17:
+            continue
+        if (
+            str(row[3]) == str(company)
+            and str(row[4]) == str(marka_ts)
+            and str(row[5]) == str(radius)
+            and str(row[6]) == str(razmer)
+            and str(row[7]) == str(marka_rez)
+            and str(row[8]) == str(model_rez)
+            and str(row[9]) == str(sezon)
+            and str(row[10]) == str(type_disk)
+            and str(row[16]) == ""
+        ):
+            matching_rows.append(row)
+
+    if not matching_rows:
+        for row in rows:
+            if len(row) < 17:
+                continue
+            if (
+                str(row[3]) == str(company)
+                and str(row[4]) == str(marka_ts)
+                and str(row[5]) == str(radius)
+                and str(row[6]) == str(razmer)
+                and str(row[9]) == str(sezon)
+                and str(row[16]) == ""
+            ):
+                matching_rows.append(row)
+
+    groups: dict[str, list[list[str]]] = {}
+    for row in matching_rows:
+        key = row[13]
+        groups.setdefault(key, []).append(row)
+
+    for key, group_rows in groups.items():
+        if len(group_rows) == 4:
+            komplekts.add(key)
+
+    if len(matching_rows) >= 2:
+        sides = {row[11] for row in matching_rows}
+        if "Левое" in sides and "Правое" in sides:
+            axes.append(matching_rows[0][13])
+
+    if type_kolesa == "Ось":
+        return axes
+    if type_kolesa == "Комплект":
+        return list(komplekts)
+    return []
+
+
+def update_data_sborka(marka_rez, model_rez, type_disk, type_kolesa, nomer_sborka):
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()
+
+    for idx, row in enumerate(rows, start=1):
+        if len(row) < 14:
+            continue
+        if str(row[13]) == str(nomer_sborka) and str(row[11]) == str(type_kolesa):
+            ws.batch_update([
+                {"range": f"K{idx}:K{idx}", "values": [[str(type_disk)]]},
+                {"range": f"H{idx}:I{idx}", "values": [[str(marka_rez), str(model_rez)]]},
+            ])
+            return
+
+
+def update_record_sborka(company, username, radius, razmer, marka_rez, model_rez, sezon, marka_ts, type_disk, type_kolesa, message_link, nomer_sborka):
+    sh = _open_sklad_sheet()
+    ws = sh.worksheet("Заявка на сборку")
+    rows = ws.get_all_values()
+    current_time = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+
+    matches: list[tuple[int, list[str]]] = []
+    for j, row in enumerate(rows):
+        if len(row) < 17:
+            continue
+        if (
+            str(row[3]) == str(company)
+            and str(row[4]) == str(marka_ts)
+            and str(row[5]) == str(radius)
+            and str(row[6]) == str(razmer)
+            and str(row[7]) == str(marka_rez)
+            and str(row[8]) == str(model_rez)
+            and str(row[9]) == str(sezon)
+            and str(row[10]) == str(type_disk)
+            and str(row[13]) == str(nomer_sborka)
+            and str(row[16]) == ""
+        ):
+            matches.append((j, row))
+
+    if not matches:
+        for j, row in enumerate(rows):
+            if len(row) < 17:
+                continue
+            if (
+                str(row[3]) == str(company)
+                and str(row[4]) == str(marka_ts)
+                and str(row[5]) == str(radius)
+                and str(row[6]) == str(razmer)
+                and str(row[9]) == str(sezon)
+                and str(row[13]) == str(nomer_sborka)
+                and str(row[16]) == ""
+            ):
+                matches.append((j, row))
+
+    updates: list[dict] = []
+    if type_kolesa not in ("Комплект", "Ось"):
+        for j, row in matches:
+            if str(row[11]) == str(type_kolesa):
+                updates.append({"range": f"P{j + 1}:S{j + 1}", "values": [[current_time, "Собрано", str(message_link), str(username)]]})
+                break
+    else:
+        required = 2 if type_kolesa == "Комплект" else 1
+        sides_updated = {"Правое": 0, "Левое": 0}
+        for j, row in matches:
+            side = str(row[11])
+            if side in sides_updated and sides_updated[side] < required:
+                updates.append({"range": f"P{j + 1}:S{j + 1}", "values": [[current_time, "Собрано", str(message_link), str(username)]]})
+                sides_updated[side] += 1
+
+    if updates:
+        ws.batch_update(updates)
+        
 async def load_damage_reference_data() -> dict:
     """Загружает справочники для сценария /damage из Google Sheets."""
     gc: Client = gspread.service_account("app/creds.json")

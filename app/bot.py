@@ -23,6 +23,7 @@ from app.handlers.registration import (
 )
 from app.handlers import work_shift
 from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
+from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 _reg = RegistrationState(wait_phone_users=set())
 _shift = work_shift.WorkShiftState()
 _damage = DamageState()
+_sborka = SborkaState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -251,6 +253,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "end_work_shift": "/end_work_shift",
         "end-job-shift": "/end_work_shift",
         "damage": "/damage",
+        "sborka": "/sborka",
+        "сборка": "/sborka",
         "повреждение": "/damage",
         "регистрация": "/registration",
         "начало смены": "/start_job_shift",
@@ -271,6 +275,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
         return
     if await try_handle_damage_step(_damage, user_id, chat_id, t, msg):
+        return
+    if await try_handle_sborka_step(_sborka, user_id, chat_id, t, msg):
         return
 
     # 2) Команды
@@ -298,10 +304,14 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_damage(_damage, user_id, chat_id, username)
         return
-
+    if t in {"/sborka", "/sborka_ko"}:
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_sborka(_sborka, user_id, chat_id, username, cmd=t.lstrip("/"))
+        return
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka")
 async def _polling_loop() -> None:
     marker: Optional[int] = None
     logging.info("MAX polling started")
