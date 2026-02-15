@@ -1,5 +1,6 @@
 # app/bot.py
 from __future__ import annotations
+import asyncio
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -8,7 +9,6 @@ import re
 
 import logging
 import threading
-import time
 from typing import Optional
 
 from app.utils.scheduler import start_schedulers
@@ -205,7 +205,7 @@ def _chat_id(msg: dict) -> Optional[int]:
     return None
 
 # ===== Routing =====
-def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
+async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     t = text.strip()
 
     # Кнопки в MAX могут присылать либо slash-команды, либо человекочитаемый текст.
@@ -231,9 +231,9 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         t = aliases.get(normalized, t)
 
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
-    if try_handle_phone_step(_reg, user_id, chat_id, t, msg):
+    if await try_handle_phone_step(_reg, user_id, chat_id, t, msg):
         return
-    if work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
+    if await work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
         return
 
     # 2) Команды
@@ -241,31 +241,31 @@ def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     if t == "/start":
-        send_text(chat_id, WELCOME_TEXT)
+        await send_text(chat_id, WELCOME_TEXT)
         return
 
     if t == "/registration":
-        cmd_registration(_reg, user_id, chat_id)
+        await cmd_registration(_reg, user_id, chat_id)
         return
 
     if t == "/start_job_shift":
-        work_shift.cmd_start_job_shift(_shift, user_id, chat_id)
+        await work_shift.cmd_start_job_shift(_shift, user_id, chat_id)
         return
 
     if t == "/end_work_shift":
-        work_shift.cmd_end_work_shift(_shift, user_id, chat_id)
+        await work_shift.cmd_end_work_shift(_shift, user_id, chat_id)
         return
 
     # 3) Default
-    send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift")
 
-def _polling_loop() -> None:
+async def _polling_loop() -> None:
     marker: Optional[int] = None
     logging.info("MAX polling started")
 
     while True:
         try:
-            data = get_updates(marker)
+            data = await get_updates(marker)
 
             # marker
             m = data.get("marker")
@@ -303,13 +303,13 @@ def _polling_loop() -> None:
                     continue
 
                 try:
-                    _route_text(user_id, chat_id, text, msg)
+                    await _route_text(user_id, chat_id, text, msg)
                 except Exception:
                     logging.exception("handler failed user_id=%s chat_id=%s", user_id, chat_id)
 
         except Exception:
             logging.exception("polling error; retry in 2s")
-            time.sleep(2)
+            await asyncio.sleep(2)
 
 
 def run() -> None:
@@ -342,4 +342,4 @@ def run() -> None:
     start_schedulers()
 
     # Polling в основном потоке
-    _polling_loop()
+    asyncio.run(_polling_loop())

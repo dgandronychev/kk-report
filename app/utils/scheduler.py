@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, time
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from app.utils.max_api import send_text
+from app.utils.max_api import send_text_sync
 from app.utils.gsheets import find_logistics_rows_shift
 from app.config import LOGISTICS_CHAT_IDS, REPORT_CHAT_ID
 
@@ -123,7 +123,7 @@ def _logistics_loop(schedules: Schedules) -> None:
             text = _build_logistics_text(datetime.now(TZ_MSK))
             for cid in chat_ids:
                 try:
-                    send_text(cid, text)
+                    send_text_sync(cid, text)
                 except Exception:
                     logger.exception("Failed to send logistics to chat_id=%s", cid)
         except Exception:
@@ -146,7 +146,7 @@ def _report_loop(schedules: Schedules) -> None:
             logger.info("Next MAX report reminder at %s (in %.0fs)", target.isoformat(), delay)
             time_mod.sleep(delay)
 
-            send_text(chat_id, text)
+            send_text_sync(chat_id, text)
         except Exception:
             logger.exception("Report scheduler loop error; retry in 60s")
             time_mod.sleep(60)

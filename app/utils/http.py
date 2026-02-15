@@ -19,9 +19,9 @@ class NotifyIn(BaseModel):
 
 
 @app.post("/notify")
-def notify(payload: NotifyIn):
+async def notify(payload: NotifyIn):
     try:
-        send_text(payload.chat_id, payload.text)
+        await send_text(payload.chat_id, payload.text)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -38,7 +38,7 @@ async def notify_image(
         if not content:
             raise HTTPException(status_code=400, detail="Empty file")
 
-        send_image(
+        await send_image(
             chat_id=chat_id,
             file_bytes=content,
             filename=file.filename or "image.jpg",

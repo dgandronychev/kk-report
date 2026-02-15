@@ -7,6 +7,7 @@ from typing import Dict, List
 from app.config import WORK_SHIFT_CHAT_ID
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
 
+
 @dataclass
 class WorkShiftState:
     wait_files_start: set[int] = field(default_factory=set)
@@ -43,16 +44,6 @@ def _extract_attachments(msg: dict) -> List[dict]:
             attachments = payload.get("attachments")
 
     if not isinstance(attachments, list):
-        body = msg.get("body")
-        if isinstance(body, dict):
-            attachments = body.get("attachments")
-
-    if not isinstance(attachments, list):
-        payload = msg.get("payload")
-        if isinstance(payload, dict):
-            attachments = payload.get("attachments")
-
-    if not isinstance(attachments, list):
         return []
 
     files: List[dict] = []
@@ -73,29 +64,34 @@ def _caption(action: str, fio: str, username: str) -> str:
         f"{action}\n"
     )
 
-def _send_work_shift_prompt(chat_id: int) -> None:
-    send_text_with_reply_buttons(
+
+async def _send_work_shift_prompt(chat_id: int) -> None:
+    await send_text_with_reply_buttons(
         chat_id=chat_id,
         text="Прикрепите фото/видео/файл и нажмите «Готово». Для отмены нажмите «Выход».",
         button_texts=["Готово", "Выход"],
         button_payloads=["work_shift_done", "work_shift_exit"],
     )
-def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+
+
+async def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_end.discard(user_id)
     st.wait_files_start.add(user_id)
     st.files_by_user[user_id] = []
-    _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(chat_id)
 
-def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+
+async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.wait_files_start.discard(user_id)
     st.wait_files_end.add(user_id)
     st.files_by_user[user_id] = []
-    _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(chat_id)
 
-def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action: str) -> bool:
+
+async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action: str) -> bool:
     files = st.files_by_user.get(user_id, [])
     if not files:
-        send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
+        await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
     fio = _extract_fio(msg)
@@ -103,8 +99,8 @@ def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action:
     report = _caption(action, fio, username)
     report = f"{report}\n📎 Вложений: {len(files)}"
 
-    send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
-    send_text(chat_id, "Ваша заявка сформирована")
+    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
+    await send_text(chat_id, "Ваша заявка сформирована")
 
     st.wait_files_start.discard(user_id)
     st.wait_files_end.discard(user_id)
@@ -112,7 +108,7 @@ def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action:
     return True
 
 
-def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
+async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     is_start_flow = user_id in st.wait_files_start
     is_end_flow = user_id in st.wait_files_end
     if not is_start_flow and not is_end_flow:
@@ -124,20 +120,20 @@ def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: int, t
         st.wait_files_start.discard(user_id)
         st.wait_files_end.discard(user_id)
         st.files_by_user.pop(user_id, None)
-        send_text(chat_id, "Оформление заявки отменено")
+        await send_text(chat_id, "Оформление заявки отменено")
         return True
 
     attachments = _extract_attachments(msg)
     if attachments:
         files = st.files_by_user.setdefault(user_id, [])
         files.extend(attachments)
-        send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
+        await send_text(chat_id, f"Файлов добавлено: {len(attachments)}. Текущее количество: {len(files)}")
         return True
 
     if clean_text in {"Готово", "work_shift_done"}:
         if is_start_flow:
-            return _finalize(st, user_id, chat_id, msg, "Начало смены")
-        return _finalize(st, user_id, chat_id, msg, "Окончание смены")
+            return await _finalize(st, user_id, chat_id, msg, "Начало смены")
+        return await _finalize(st, user_id, chat_id, msg, "Окончание смены")
 
-    _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(chat_id)
     return True
