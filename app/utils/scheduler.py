@@ -99,7 +99,7 @@ def _build_logistics_text(now: datetime) -> str:
         return "Запись о текущем логисте не найдена"
 
     # active: list[tuple(direction, fio, tag)] — как в TG логике
-    logistics = "\n".join(f"{direction}: {fio}" for direction, fio in active)
+    logistics = "\n".join(f"{direction}: {fio}" for direction, fio, _tag in active)
     return (
         "Доброго времени суток!\n"
         f"Сегодня ответственные логисты CleanCar с {begin} до {end}:\n{logistics}"

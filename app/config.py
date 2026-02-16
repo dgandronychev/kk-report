@@ -15,7 +15,7 @@ LOGS_DIR = "logs"
 URL_REGISTRASHION = "https://stage.app.clean-car.net/api/v1/bots/max_information/update/"
 URL_GET_FIO = "https://stage.app.clean-car.net/api/v1/bots/accident/retrieve/",
 
-LOGISTICS_CHAT_IDS = "199909595,199909595"
+LOGISTICS_CHAT_IDS = "-70635401257012,-70646361948407,-70637799415860"
 REPORT_CHAT_ID = "199909595"
 WORK_SHIFT_CHAT_ID ="199909595"
 DAMAGE_CHAT_ID_CITY = "199909595"

@@ -64,9 +64,9 @@ async def post_registration_async(
         return "URL_REGISTRASHION is not set"
 
     json_data = {
-        "phone": phone,
-        "max_username_id": max_user_id,
-        "max_chat_id": max_chat_id,
+        "phone": str(phone),
+        "max_username": str(max_user_id),
+        "max_chat_id": str(max_chat_id),
     }
 
     async with httpx.AsyncClient(timeout=20) as client:
