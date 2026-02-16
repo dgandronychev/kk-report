@@ -243,6 +243,46 @@ def _chat_id(msg: dict) -> Optional[int]:
 
     return None
 
+def _is_private_chat(msg: dict, chat_id: int, user_id: int) -> bool:
+    def _normalize_chat_type(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return ""
+
+    # Явные типы личного диалога в разных схемах MAX-подобных апдейтов.
+    private_types = {
+        "private",
+        "dialog",
+        "direct",
+        "dm",
+        "one_to_one",
+        "personal",
+        "user",
+    }
+
+    for node in (
+        msg,
+        msg.get("recipient") if isinstance(msg.get("recipient"), dict) else None,
+        msg.get("sender") if isinstance(msg.get("sender"), dict) else None,
+        msg.get("body") if isinstance(msg.get("body"), dict) else None,
+        (msg.get("body") or {}).get("recipient") if isinstance((msg.get("body") or {}).get("recipient"), dict) else None,
+        msg.get("payload") if isinstance(msg.get("payload"), dict) else None,
+        (msg.get("payload") or {}).get("recipient") if isinstance((msg.get("payload") or {}).get("recipient"), dict) else None,
+        msg.get("callback") if isinstance(msg.get("callback"), dict) else None,
+        (msg.get("callback") or {}).get("recipient") if isinstance((msg.get("callback") or {}).get("recipient"), dict) else None,
+    ):
+        if not isinstance(node, dict):
+            continue
+        for key in ("chat_type", "type", "dialog_type", "conversation_type", "peer_type"):
+            chat_type = _normalize_chat_type(node.get(key))
+            if chat_type in private_types:
+                return True
+            if chat_type and chat_type not in private_types:
+                return False
+
+    # Fallback: в личке chat_id часто совпадает с user_id.
+    return chat_id == user_id
+
 # ===== Routing =====
 async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     t = text.strip()
@@ -381,6 +421,9 @@ async def _polling_loop() -> None:
                 text = _msg_text(msg)
 
                 if user_id is None:
+                    continue
+
+                if not _is_private_chat(msg, chat_id=chat_id, user_id=user_id):
                     continue
 
                 # Callback events (inline keyboard buttons) can come without text
