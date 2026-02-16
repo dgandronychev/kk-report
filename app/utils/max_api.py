@@ -118,20 +118,27 @@ async def send_message(
     r.raise_for_status()
     return r.json()
 
+def _find_message_id(value: Any) -> Optional[str]:
+    if isinstance(value, dict):
+        for key in ("message_id", "mid", "id"):
+            v = value.get(key)
+            if v is not None:
+                return str(v)
+        for nested in value.values():
+            found = _find_message_id(nested)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _find_message_id(item)
+            if found:
+                return found
+    return None
+
 def extract_message_id(payload: Optional[dict]) -> Optional[str]:
     if not isinstance(payload, dict):
         return None
-    for key in ("message_id", "id", "mid"):  # variants in API payloads
-        value = payload.get(key)
-        if value is not None:
-            return str(value)
-    result = payload.get("result")
-    if isinstance(result, list) and result and isinstance(result[0], dict):
-        for key in ("message_id", "id", "mid"):
-            value = result[0].get(key)
-            if value is not None:
-                return str(value)
-    return None
+    return _find_message_id(payload)
 
 
 async def delete_message(chat_id: int, message_id: str | int) -> bool:
@@ -139,6 +146,7 @@ async def delete_message(chat_id: int, message_id: str | int) -> bool:
     candidates = [
         (f"{API_BASE}/messages/{mid}", {"chat_id": chat_id}),
         (f"{API_BASE}/messages", {"chat_id": chat_id, "message_id": mid}),
+        (f"{API_BASE}/messages", {"chat_id": chat_id, "mid": mid}),
     ]
 
     async with httpx.AsyncClient(timeout=20) as client:
@@ -150,6 +158,7 @@ async def delete_message(chat_id: int, message_id: str | int) -> bool:
             except Exception:
                 logger.exception("[MAX API] delete message failed | url=%s", url)
 
+    logger.warning("[MAX API] delete message failed | chat_id=%s | message_id=%s", chat_id, mid)
     return False
 
 async def upload_image_to_max(file_bytes: bytes, filename: str = "image.jpg") -> dict:
