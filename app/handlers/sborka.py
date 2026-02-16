@@ -69,12 +69,24 @@ async def _ensure_refs_loaded() -> None:
         _ref_data = await load_sborka_reference_data()
 
 
-def _kb_control() -> tuple[list[str], list[str]]:
-    return ["Назад", "Выход"], ["sborka_back", "sborka_exit"]
+def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
+    if include_back:
+        return ["Назад", "Выход"], ["sborka_back", "sborka_exit"]
+    return ["Выход"], ["sborka_exit"]
+
+async def _send_flow_text(flow: SborkaFlow, chat_id: int, text: str) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_message(chat_id=chat_id, text=text)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 
-async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str]) -> None:
-    buttons, payloads = _kb_control()
+async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
+    buttons, payloads = _kb_control(include_back=include_back)
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
         await delete_message(chat_id, prev_msg_id)
@@ -215,10 +227,10 @@ async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str,
     await _ensure_refs_loaded()
     if cmd == "check":
         st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": "sborka", "type": "check"})
-        await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY)
+        await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
         return
     st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": cmd, "type": "sborka"})
-    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY)
+    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
 
 
 def _clear(st: SborkaState, user_id: int) -> None:
@@ -295,7 +307,7 @@ def _write_check_rows(data: dict, username: str) -> None:
 async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> bool:
     flow = st.flows_by_user[user_id]
     if not flow.files:
-        await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
+        await _send_flow_text(flow, chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
     data = flow.data
@@ -361,7 +373,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
             await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
             return True
         flow.step = "company"
-        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
         return True
 
     if step == "radius":
@@ -396,7 +408,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
     if step == "marka_ts":
         if flow.data.get("type") == "check":
             flow.step = "company"
-            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
             return True
         flow.step = "sezon"
         await _ask(flow, chat_id, "Сезон:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""), field=GHRezina.SEZON))
@@ -440,7 +452,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
         if candidates:
             await _ask(flow, chat_id, "Номер заявки:", sorted(set(candidates))[:50])
         else:
-            await send_text(chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
+            await _send_flow_text(flow, chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
         return True
 
     return True
@@ -468,7 +480,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
 
     if step == "company":
         if t not in _KEY_COMPANY:
-            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY)
+            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY, include_back=False)
             return True
         flow.data["company"] = t
         if flow.data.get("type") == "check":
@@ -596,7 +608,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
         if candidates:
             await _ask(flow, chat_id, "Номер заявки:", sorted(set(candidates))[:50])
         else:
-            await send_text(chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
+            await _send_flow_text(flow, chat_id, "Номер заявки не найден. Отправьте номер вручную или текст 'не найден'.")
         return True
 
     if step == "nomer":
@@ -630,7 +642,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
                 flow.file_keys.add(key)
                 flow.files.append(item)
                 new_items += 1
-            await send_text(chat_id, f"Файлов добавлено: {new_items}. Текущее количество: {len(flow.files)}")
+            await _send_flow_text(flow, chat_id, f"Файлов добавлено: {new_items}. Текущее количество: {len(flow.files)}")
             return True
 
         prev_msg_id = flow.data.get("prompt_msg_id")
