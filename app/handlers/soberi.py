@@ -153,7 +153,7 @@ async def _ask(flow: SoberiFlow, chat_id: int, text: str, options: list[str], in
 async def cmd_soberi(st: SoberiState, user_id: int, chat_id: int, username: str) -> None:
     await _ensure_refs_loaded()
     st.flows_by_user[user_id] = SoberiFlow(step="type_soberi", data={"username": f"@{username}"})
-    await _ask(st.flows_by_user[user_id], "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
+    await _ask(st.flows_by_user[user_id], chat_id, "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
 
 
 async def cmd_soberi_belka(st: SoberiState, user_id: int, chat_id: int, username: str) -> None:
@@ -162,7 +162,7 @@ async def cmd_soberi_belka(st: SoberiState, user_id: int, chat_id: int, username
         step="type_soberi",
         data={"username": f"@{username}", "company": "Белка", "preset_company": True},
     )
-    await _ask(st.flows_by_user[user_id], "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
+    await _ask(st.flows_by_user[user_id], chat_id, "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
 
 
 def _next_rows(data: dict) -> list[list[str]]:
