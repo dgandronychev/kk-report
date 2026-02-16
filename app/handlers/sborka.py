@@ -101,6 +101,9 @@ async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str], in
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
+async def _ask_company(flow: SborkaFlow, chat_id: int, text: str = "Компания:") -> None:
+    await _ask(flow, chat_id, text, _KEY_COMPANY, include_back=False)
+
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
 
@@ -227,10 +230,10 @@ async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str,
     await _ensure_refs_loaded()
     if cmd == "check":
         st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": "sborka", "type": "check"})
-        await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+        await _ask_company(st.flows_by_user[user_id], chat_id)
         return
     st.flows_by_user[user_id] = SborkaFlow(step="company", data={"username": username, "type_sborka": cmd, "type": "sborka"})
-    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+    await _ask_company(st.flows_by_user[user_id], chat_id)
 
 
 def _clear(st: SborkaState, user_id: int) -> None:
@@ -373,7 +376,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
             await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
             return True
         flow.step = "company"
-        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+        await _ask_company(flow, chat_id)
         return True
 
     if step == "radius":
@@ -408,7 +411,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
     if step == "marka_ts":
         if flow.data.get("type") == "check":
             flow.step = "company"
-            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+            await _ask_company(flow, chat_id)
             return True
         flow.step = "sezon"
         await _ask(flow, chat_id, "Сезон:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""), field=GHRezina.SEZON))
@@ -480,7 +483,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
 
     if step == "company":
         if t not in _KEY_COMPANY:
-            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY, include_back=False)
+            await _ask_company(flow, chat_id, "Выберите компанию:")
             return True
         flow.data["company"] = t
         if flow.data.get("type") == "check":
@@ -503,7 +506,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
     if step == "radius":
         options = _list_radius(flow.data["company"])
         if t not in options:
-            await _askflow, (chat_id, "Выберите радиус:", options)
+            await _ask(flow, chat_id, "Выберите радиус:", options)
             return True
         flow.data["radius"] = t
         flow.step = "razmer"
@@ -543,7 +546,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
     if step == "sezon":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=flow.data["model_rez"], field=GHRezina.SEZON)
         if t not in options:
-            await _ask(chat_id, "Выберите сезон:", options)
+            await _ask(flow, chat_id, "Выберите сезон:", options)
             return True
         flow.data["sezon"] = t
         if flow.data.get("type") == "check":
