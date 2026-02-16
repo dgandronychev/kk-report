@@ -7,7 +7,7 @@ import logging
 from pprint import pformat
 from typing import Dict, List, Optional, Set
 from app.config import WORK_SHIFT_CHAT_ID
-from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 from app.utils.gsheets import write_in_answers_ras_shift
 from app.utils.helper import get_fio_async
 
@@ -30,6 +30,7 @@ class WorkShiftState:
     files_by_user: Dict[int, List[dict]] = field(default_factory=dict)
     seen_file_keys_by_user: Dict[int, Set[str]] = field(default_factory=dict)
     active_user_by_chat: Dict[int, int] = field(default_factory=dict)
+    prompt_msg_id_by_user: Dict[int, str] = field(default_factory=dict)
 
 def _resolve_flow_user(st: WorkShiftState, user_id: int, chat_id: int) -> Optional[int]:
     if user_id in st.wait_files_start or user_id in st.wait_files_end:
@@ -49,6 +50,7 @@ def _clear_flow(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     st.seen_file_keys_by_user.pop(user_id, None)
     if st.active_user_by_chat.get(chat_id) == user_id:
         st.active_user_by_chat.pop(chat_id, None)
+    st.prompt_msg_id_by_user.pop(user_id, None)
 
 def _extract_user_label(msg: dict, user_id: int) -> str:
     sender = msg.get("sender") or {}
@@ -100,14 +102,34 @@ def _caption(action: str, fio: str, username: str) -> str:
     )
 
 
-async def _send_work_shift_prompt(chat_id: int) -> None:
-    await send_text_with_reply_buttons(
+async def _send_work_shift_prompt(st: WorkShiftState, user_id: int, chat_id: int, include_back: bool = True) -> None:
+    prev_msg_id = st.prompt_msg_id_by_user.get(user_id)
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    button_texts = ["Выход"] if not include_back else ["Готово", "Назад", "Выход"]
+    button_payloads = ["work_shift_exit"] if not include_back else ["work_shift_done", "work_shift_back", "work_shift_exit"]
+
+    response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text="Прикрепите фото/видео/файл и нажмите «Готово». Для отмены нажмите «Выход».",
-        button_texts=["Готово", "Выход"],
-        button_payloads=["work_shift_done", "work_shift_exit"],
+        button_texts=button_texts,
+        button_payloads=button_payloads,
     )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        st.prompt_msg_id_by_user[user_id] = msg_id
 
+
+async def _send_flow_text(st: WorkShiftState, user_id: int, chat_id: int, text: str) -> None:
+    prev_msg_id = st.prompt_msg_id_by_user.get(user_id)
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_message(chat_id=chat_id, text=text)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        st.prompt_msg_id_by_user[user_id] = msg_id
 
 async def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     old_user_id = st.active_user_by_chat.get(chat_id)
@@ -118,7 +140,7 @@ async def cmd_start_job_shift(st: WorkShiftState, user_id: int, chat_id: int) ->
     st.files_by_user[user_id] = []
     st.seen_file_keys_by_user[user_id] = set()
     st.active_user_by_chat[chat_id] = user_id
-    await _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(st, user_id, chat_id, include_back=False)
 
 
 async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> None:
@@ -130,14 +152,14 @@ async def cmd_end_work_shift(st: WorkShiftState, user_id: int, chat_id: int) -> 
     st.files_by_user[user_id] = []
     st.seen_file_keys_by_user[user_id] = set()
     st.active_user_by_chat[chat_id] = user_id
-    await _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(st, user_id, chat_id, include_back=False)
 
 
 async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, action: str) -> bool:
     files = st.files_by_user.get(user_id, [])
 
     if not files:
-        await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
+        await _send_flow_text(st, user_id, chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
@@ -157,7 +179,7 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
     except Exception:
         logger.exception("Failed to write work shift report to Google Sheets")
 
-    await send_text(chat_id, "Ваша заявка сформирована")
+    await _send_flow_text(st, user_id, chat_id, "Ваша заявка сформирована")
 
     _clear_flow(st, user_id, chat_id)
     return True
@@ -205,8 +227,22 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
         return True
 
     if normalized_candidates & {"выход", "work_shift_exit"}:
+        prompt_msg_id = st.prompt_msg_id_by_user.get(flow_user_id)
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear_flow(st, flow_user_id, chat_id)
         await send_text(chat_id, "Оформление заявки отменено")
+        return True
+
+    if normalized_candidates & {"назад", "work_shift_back"}:
+        files = st.files_by_user.get(flow_user_id, [])
+        if files:
+            files.pop()
+            st.seen_file_keys_by_user[flow_user_id] = {_attachment_key(item) for item in files}
+            await _send_flow_text(st, flow_user_id, chat_id, f"Удален последний файл. Текущее количество: {len(files)}")
+        else:
+            await _send_flow_text(st, flow_user_id, chat_id, "Нет файлов для удаления")
+        await _send_work_shift_prompt(st, flow_user_id, chat_id, include_back=True)
         return True
 
     if normalized_candidates & {"готово", "work_shift_done"}:
@@ -231,10 +267,12 @@ async def try_handle_work_shift_step(st: WorkShiftState, user_id: int, chat_id: 
 
         if new_files:
             files.extend(new_files)
-            await send_text(chat_id, f"Файлов добавлено: {len(new_files)}. Текущее количество: {len(files)}")
+            await _send_flow_text(st, flow_user_id, chat_id, f"Файлов добавлено: {len(new_files)}. Текущее количество: {len(files)}")
+            await _send_work_shift_prompt(st, flow_user_id, chat_id, include_back=True)
         else:
-            await send_text(chat_id, f"Этот файл уже добавлен. Текущее количество: {len(files)}")
+            await _send_flow_text(st, flow_user_id, chat_id, f"Этот файл уже добавлен. Текущее количество: {len(files)}")
+            await _send_work_shift_prompt(st, flow_user_id, chat_id, include_back=True)
         return True
 
-    await _send_work_shift_prompt(chat_id)
+    await _send_work_shift_prompt(st, flow_user_id, chat_id, include_back=True)
     return True

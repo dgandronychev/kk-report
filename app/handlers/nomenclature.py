@@ -6,7 +6,7 @@ from typing import Dict
 
 from app.config import NOMENCLATURE_ALLOWED_USER_IDS
 from app.utils.gsheets import load_nomenclature_reference_data, write_in_answers_ras_nomen
-from app.utils.max_api import delete_message, extract_message_id, send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,15 @@ async def _ask(flow: NomenclatureFlow, chat_id: int, text: str, options: list[st
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
+async def _send_flow_text(flow: NomenclatureFlow, chat_id: int, text: str) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_message(chat_id=chat_id, text=text)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 def _clear(st: NomenclatureState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
@@ -203,21 +212,15 @@ async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat
             await _ask(flow, chat_id, "Введите АЛ:", [], include_back=True)
             return True
         _save(data)
-        prompt_msg_id = flow.data.get("prompt_msg_id")
-        if prompt_msg_id:
-            await delete_message(chat_id, prompt_msg_id)
+        await _send_flow_text(flow, chat_id, "Добавление новой номенклатуры выполнено")
         _clear(st, user_id)
-        await send_text(chat_id, "Добавление новой номенклатуры выполнено")
         return True
 
     if step == "al":
         data["al"] = t
         _save(data)
-        prompt_msg_id = flow.data.get("prompt_msg_id")
-        if prompt_msg_id:
-            await delete_message(chat_id, prompt_msg_id)
+        await _send_flow_text(flow, chat_id, "Добавление новой номенклатуры выполнено")
         _clear(st, user_id)
-        await send_text(chat_id, "Добавление новой номенклатуры выполнено")
         return True
 
     return True

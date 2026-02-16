@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Set
 from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
 from app.utils.gsheets import load_damage_reference_data, write_in_answers_ras
 from app.utils.helper import get_fio_async
-from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +63,37 @@ async def _ensure_refs_loaded() -> None:
     if _ref_data is None:
         _ref_data = await load_damage_reference_data()
 
+def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
+    if include_back:
+        return ["Назад", "Выход"], ["damage_back", "damage_exit"]
+    return ["Выход"], ["damage_exit"]
 
-def _kb_control() -> tuple[list[str], list[str]]:
-    return ["Назад", "Выход"], ["damage_back", "damage_exit"]
 
+async def _send_flow_text(flow: NomenclatureFlow, chat_id: int, text: str) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
 
-async def _ask(chat_id: int, text: str, options: list[str]) -> None:
-    buttons, payloads = _kb_control()
-    await send_text_with_reply_buttons(
+    response = await send_message(chat_id=chat_id, text=text)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+async def _ask(flow: DamageFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
+    buttons, payloads = _kb_control(include_back=include_back)
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text=text,
         button_texts=options + buttons,
         button_payloads=options + payloads,
     )
-
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
     attachments = msg.get("attachments")
@@ -209,7 +226,7 @@ def _render_report(data: dict, fio: str, username: str) -> str:
 async def cmd_damage(st: DamageState, user_id: int, chat_id: int, username: str) -> None:
     await _ensure_refs_loaded()
     st.flows_by_user[user_id] = DamageFlow(step="company", data={"username": username})
-    await _ask(chat_id, "Компания:", _KEY_COMPANY)
+    await _ask(st.flows_by_user[user_id], chat_id, "Компания:", _KEY_COMPANY, include_back=False)
 
 
 def _clear(st: DamageState, user_id: int) -> None:
@@ -219,7 +236,7 @@ def _clear(st: DamageState, user_id: int) -> None:
 async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> bool:
     flow = st.flows_by_user[user_id]
     if not flow.files:
-        await send_text(chat_id, "Нужно прикрепить как минимум 1 файл")
+        await _send_flow_text(flow, chat_id, "Нужно прикрепить как минимум 1 файл")
         return True
 
     data = flow.data
@@ -258,8 +275,109 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
     except Exception:
         logger.exception("failed to write damage report to google sheets")
 
+    await _send_flow_text(flow, chat_id, "Ваша заявка на оформление повреждения сформирована")
     _clear(st, user_id)
-    await send_text(chat_id, "Ваша заявка на оформление повреждения сформирована")
+    return True
+
+async def _handle_back(flow: DamageFlow, chat_id: int) -> bool:
+    step = flow.step
+    company = flow.data.get("company", "")
+
+    if step == "company":
+        return True
+
+    if step == "wheel_type":
+        flow.step = "company"
+        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+        return True
+
+    if step == "grz":
+        flow.step = "wheel_type"
+        await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
+        return True
+
+    if step == "marka_ts":
+        flow.step = "grz"
+        await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
+        return True
+
+    if step == "radius":
+        if flow.data.get("vid_kolesa") == "В сборе":
+            flow.step = "marka_ts"
+            options = _find_grz_matches(company, flow.data.get("grz", ""))[:20]
+            await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", options)
+            return True
+        flow.step = "wheel_type"
+        await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
+        return True
+
+    if step == "razmer":
+        flow.step = "radius"
+        await _ask(flow, chat_id, "Радиус:", _list_radius(company))
+        return True
+
+    if step == "marka_rez":
+        flow.step = "razmer"
+        await _ask(flow, chat_id, "Размер:",
+                   _filter_values(company, radius=flow.data.get("radius", ""), field=GHRezina.RAZMER))
+        return True
+
+    if step == "model_rez":
+        flow.step = "marka_rez"
+        await _ask(flow, chat_id, "Марка резины:",
+                   _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""),
+                                  field=GHRezina.MARKA))
+        return True
+
+    if step == "sezon":
+        flow.step = "model_rez"
+        await _ask(flow, chat_id, "Модель резины:",
+                   _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""),
+                                  marka=flow.data.get("marka_rez", ""), field=GHRezina.MODEL))
+        return True
+
+    if step == "type_disk":
+        flow.step = "sezon"
+        await _ask(flow, chat_id, "Сезонность:",
+                   _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""),
+                                  marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""),
+                                  field=GHRezina.SEZON))
+        return True
+
+    if step == "sost_disk":
+        flow.step = "type_disk"
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        return True
+
+    if step == "sost_disk_prich":
+        flow.step = "sost_disk"
+        await _ask(flow, chat_id, "Состояние диска:", _KEY_CONDITION)
+        return True
+
+    if step == "sost_rez":
+        if flow.data.get("sost_disk") == "Ок":
+            flow.step = "sost_disk"
+            await _ask(flow, chat_id, "Состояние диска:", _KEY_CONDITION)
+            return True
+        flow.step = "sost_disk_prich"
+        await _ask(flow, chat_id, "Причина повреждения диска:", _KEY_REASON_DISK)
+        return True
+
+    if step == "sost_rez_prich":
+        flow.step = "sost_rez"
+        await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
+        return True
+
+    if step == "files":
+        if flow.data.get("sost_rez") == "Ок":
+            flow.step = "sost_rez"
+            await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
+            return True
+        flow.step = "sost_rez_prich"
+        reasons = _KEY_REASON_TIRE_UTIL if flow.data.get("sost_rez") == "Утиль" else _KEY_REASON_TIRE_REPAIR
+        await _ask(flow, chat_id, "Причина по резине:", reasons)
+        return True
+
     return True
 
 
@@ -270,37 +388,39 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
 
     controls = _control_candidates(text, msg)
     if controls & {"выход", "damage_exit"}:
+        prompt_msg_id = flow.data.get("prompt_msg_id")
+        if prompt_msg_id:
+            await delete_message(chat_id, prompt_msg_id)
         _clear(st, user_id)
         await send_text(chat_id, "Оформление заявки отменено")
         return True
 
     if controls & {"назад", "damage_back"}:
-        await send_text(chat_id, "Используйте /damage для перезапуска анкеты")
-        return True
+        return await _handle_back(flow, chat_id)
 
     step = flow.step
     t = text.strip()
 
     if step == "company":
         if t not in _KEY_COMPANY:
-            await _ask(chat_id, "Выберите компанию:", _KEY_COMPANY)
+            await _ask(flow, chat_id, "Выберите компанию:", _KEY_COMPANY, include_back=False)
             return True
         flow.data["company"] = t
         flow.step = "wheel_type"
-        await _ask(chat_id, "Вид колеса:", _KEY_TYPE)
+        await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
         return True
 
     if step == "wheel_type":
         if t not in _KEY_TYPE:
-            await _ask(chat_id, "Выберите вид колеса:", _KEY_TYPE)
+            await _ask(flow, chat_id, "Выберите вид колеса:", _KEY_TYPE)
             return True
         flow.data["vid_kolesa"] = t
         if t == "В сборе":
             flow.step = "grz"
-            await send_text(chat_id, "Начните ввод госномера задачи:")
+            await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
         else:
             flow.step = "radius"
-            await _ask(chat_id, "Радиус:", _list_radius(flow.data["company"]))
+            await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         return True
 
     if step == "grz":
@@ -308,120 +428,120 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
         flow.data["grz"] = t
         flow.step = "marka_ts"
         if matches:
-            await _ask(chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
+            await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
             return True
-        await send_text(chat_id, "Номер не найден в базе, ввод продолжен вручную")
+        await _send_flow_text(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
         marka = _find_car_mark(flow.data["company"], t)
         if marka:
-            await send_text(chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
+            await _send_flow_text(flow, chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
         else:
-            await send_text(chat_id, "Введите марку/модель автомобиля:")
+            await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
         return True
 
     if step == "marka_ts":
         flow.data["marka_ts"] = t
         flow.step = "radius"
-        await _ask(chat_id, "Радиус:", _list_radius(flow.data["company"]))
+        await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         return True
 
     if step == "radius":
         options = _list_radius(flow.data["company"])
         if t not in options:
-            await _ask(chat_id, "Введенного радиуса нет в базе. Выберите из списка:", options)
+            await _ask(flow, chat_id, "Введенного радиуса нет в базе. Выберите из списка:", options)
             return True
         flow.data["radius"] = t
         flow.step = "razmer"
-        await _ask(chat_id, "Размер:", _filter_values(flow.data["company"], radius=t, field=GHRezina.RAZMER))
+        await _ask(flow, chat_id, "Размер:", _filter_values(flow.data["company"], radius=t, field=GHRezina.RAZMER))
         return True
 
     if step == "razmer":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], field=GHRezina.RAZMER)
         if t not in options:
-            await _ask(chat_id, "Введенного размера нет в базе. Выберите из списка:", options)
+            await _ask(flow, chat_id, "Введенного размера нет в базе. Выберите из списка:", options)
             return True
         flow.data["razmer"] = t
         flow.step = "marka_rez"
-        await _ask(chat_id, "Марка резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=t, field=GHRezina.MARKA))
+        await _ask(flow, chat_id, "Марка резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=t, field=GHRezina.MARKA))
         return True
 
     if step == "marka_rez":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], field=GHRezina.MARKA)
         if t not in options:
-            await _ask(chat_id, "Введенной марки нет в базе. Выберите из списка:", options)
+            await _ask(flow, chat_id, "Введенной марки нет в базе. Выберите из списка:", options)
             return True
         flow.data["marka_rez"] = t
         flow.step = "model_rez"
-        await _ask(chat_id, "Модель резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=t, field=GHRezina.MODEL))
+        await _ask(flow, chat_id, "Модель резины:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=t, field=GHRezina.MODEL))
         return True
 
     if step == "model_rez":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], field=GHRezina.MODEL)
         if t not in options:
-            await _ask(chat_id, "Введенной модели нет в базе. Выберите из списка:", options)
+            await _ask(flow, chat_id, "Введенной модели нет в базе. Выберите из списка:", options)
             return True
         flow.data["model_rez"] = t
         flow.step = "sezon"
-        await _ask(chat_id, "Сезонность:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=t, field=GHRezina.SEZON))
+        await _ask(flow, chat_id, "Сезонность:", _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=t, field=GHRezina.SEZON))
         return True
 
     if step == "sezon":
         options = _filter_values(flow.data["company"], radius=flow.data["radius"], razmer=flow.data["razmer"], marka=flow.data["marka_rez"], model=flow.data["model_rez"], field=GHRezina.SEZON)
         if t not in options:
-            await _ask(chat_id, "Введенного сезона нет в базе. Выберите из списка:", options)
+            await _ask(flow, chat_id, "Введенного сезона нет в базе. Выберите из списка:", options)
             return True
         flow.data["sezon"] = t
         flow.step = "type_disk"
-        await _ask(chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
         return True
 
     if step == "type_disk":
         if t not in _KEY_TYPE_DISK:
-            await _ask(chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
+            await _ask(flow, chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
             return True
         flow.data["type_disk"] = t
         flow.step = "sost_disk"
-        await _ask(chat_id, "Состояние диска:", _KEY_CONDITION)
+        await _ask(flow, chat_id, "Состояние диска:", _KEY_CONDITION)
         return True
 
     if step == "sost_disk":
         if t not in _KEY_CONDITION:
-            await _ask(chat_id, "Выберите состояние диска:", _KEY_CONDITION)
+            await _ask(flow, chat_id, "Выберите состояние диска:", _KEY_CONDITION)
             return True
         flow.data["sost_disk"] = t
         if t == "Ок":
             flow.data["sost_disk_prich"] = ""
             flow.step = "sost_rez"
-            await _ask(chat_id, "Состояние резины:", _KEY_CONDITION)
+            await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
             return True
         flow.step = "sost_disk_prich"
-        await _ask(chat_id, "Причина повреждения диска:", _KEY_REASON_DISK)
+        await _ask(flow, chat_id, "Причина повреждения диска:", _KEY_REASON_DISK)
         return True
 
     if step == "sost_disk_prich":
         flow.data["sost_disk_prich"] = t
         flow.step = "sost_rez"
-        await _ask(chat_id, "Состояние резины:", _KEY_CONDITION)
+        await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
         return True
 
     if step == "sost_rez":
         if t not in _KEY_CONDITION:
-            await _ask(chat_id, "Выберите состояние резины:", _KEY_CONDITION)
+            await _ask(flow, chat_id, "Выберите состояние резины:", _KEY_CONDITION)
             return True
         flow.data["sost_rez"] = t
         if t == "Ок":
             flow.data["sost_rez_prich"] = ""
             flow.step = "files"
-            await _ask(chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
+            await _ask(flow, chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
             return True
         flow.step = "sost_rez_prich"
         reasons = _KEY_REASON_TIRE_UTIL if t == "Утиль" else _KEY_REASON_TIRE_REPAIR
-        await _ask(chat_id, "Причина по резине:", reasons)
+        await _ask(flow, chat_id, "Причина по резине:", reasons)
         return True
 
     if step == "sost_rez_prich":
         flow.data["sost_rez_prich"] = t
         flow.step = "files"
-        await _ask(chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
+        await _ask(flow, chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
         return True
 
     if step == "files":
@@ -430,7 +550,7 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
 
         attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
         if not attachments:
-            await _ask(chat_id, "Прикрепите минимум 1 файл и нажмите «Готово»", ["Готово"])
+            await _ask(flow, chat_id, "Прикрепите минимум 1 файл и нажмите «Готово»", ["Готово"])
             return True
 
         added = 0
@@ -441,7 +561,7 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
             flow.file_keys.add(key)
             flow.files.append(item)
             added += 1
-        await send_text(chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}")
+        await _send_flow_text(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}")
         return True
 
     return True
