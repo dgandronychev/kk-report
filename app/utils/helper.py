@@ -69,8 +69,15 @@ async def post_registration_async(
         "max_chat_id": str(max_chat_id),
     }
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(URL_REGISTRASHION, json=json_data)
+    timeout = httpx.Timeout(20.0, connect=10.0)
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(URL_REGISTRASHION, json=json_data)
+    except httpx.TimeoutException:
+        return "Сервис регистрации не ответил вовремя. Попробуйте позже."
+    except httpx.HTTPError as exc:
+        return f"Ошибка соединения с сервисом регистрации: {exc.__class__.__name__}"
 
     if r.status_code < 400:
         return None
