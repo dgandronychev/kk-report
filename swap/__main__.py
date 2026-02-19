@@ -750,6 +750,11 @@ async def damage_step_type_disk(message: types.Message, state: FSMContext):
 
     await state.update_data(type_disk=message.text)
 
+    if data.get("company", "") == "Яндекс":
+        park_ts = get_park_TS_YNDX(data.get("grz", ""))
+        if park_ts:
+            await message.answer(f"Данное ТС в парке {park_ts}")
+
     await message.answer("Состояние диска:", reply_markup=getKeyboardList(key_condition_disk))
     await DamageStates.WAIT_SOST_DISK.set()
 
@@ -3618,6 +3623,13 @@ def getGRZTs(company, input_grz):
             grz.append(string)
     return grz
 
+def get_park_TS_YNDX(grz: str):
+    grz = str(grz).strip().lower()
+    for row in list_per_ya:
+        if str(row[0]).strip().lower() == grz:
+            return row[2]
+
+    return None
 
 def check_validation_radius(company, radius):
     if company == "СитиДрайв":
