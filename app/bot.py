@@ -26,6 +26,7 @@ from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
 from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step
 from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step
 from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step
+from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ _damage = DamageState()
 _sborka = SborkaState()
 _soberi = SoberiState()
 _nomenclature = NomenclatureState()
+_open_gate = OpenGateState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -305,6 +307,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "регистрация": "/registration",
         "начало смены": "/start_job_shift",
         "окончание смены": "/end_work_shift",
+        "open_gate": "/open_gate",
+        "открыть ворота": "/open_gate",
     }
 
     if t:
@@ -379,9 +383,12 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_nomenclature(_nomenclature, user_id, chat_id, username)
         return
+    if await try_handle_open_gate_step(_open_gate, user_id, chat_id, t, msg):
+        return
+
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /soberi_belka, /nomenclature")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /soberi_belka, /nomenclature, /open_gate")
 
 async def _polling_loop() -> None:
     marker: Optional[int] = None

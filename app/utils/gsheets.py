@@ -4,7 +4,7 @@ import re
 from gspread import Client, Spreadsheet
 from typing import List, Tuple, Optional, Any
 from datetime import datetime, timedelta, time
-from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD
+from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD, GSPREAD_URL_GATES
 from gspread.exceptions import APIError
 
 EXCEL_EPOCH = datetime(1899, 12, 30)
@@ -474,3 +474,75 @@ def write_in_answers_ras_nomen(tlist: list, name_sheet: str, max_attempts: int =
 
     if last_error:
         raise last_error
+
+def write_open_gate_row(fio: str, car_plate: str, company: str, message_link: str) -> None:
+    ws = gspread.service_account("app/creds.json").open_by_url(GSPREAD_URL_GATES).worksheet("Выгрузка Техники")
+    now_msk = datetime.now() + timedelta(hours=3)
+    ws.append_row(
+        [
+            now_msk.strftime("%d.%m.%Y"),
+            now_msk.strftime("%H:%M:%S"),
+            fio,
+            car_plate,
+            company,
+            message_link,
+        ],
+        value_input_option="USER_ENTERED",
+        table_range="A1",
+        insert_data_option="INSERT_ROWS",
+    )
+
+
+def find_logistics_rows(limit_hours: int = 12) -> tuple[list[str], list[str]]:
+    ws = gspread.service_account("app/creds.json").open_by_url(URL_GOOGLE_SHEETS_CHART).worksheet("Логисты выход на смену")
+    rows = ws.get_all_values()
+    if not rows:
+        return [], []
+
+    header, data = rows[0], rows[1:]
+
+    def col_idx(name: str) -> int:
+        try:
+            return [h.strip().lower() for h in header].index(name.lower())
+        except ValueError:
+            return -1
+
+    i_fio = col_idx("ФИО")
+    i_tag = col_idx("Тег")
+    i_dir = col_idx("Направление")
+    i_start = col_idx("Время начала смены")
+    i_end = col_idx("Время конца смены")
+
+    if min(i_fio, i_tag, i_dir, i_start, i_end) < 0:
+        return [], []
+
+    now = datetime.now() + timedelta(hours=3)
+    window = timedelta(hours=limit_hours)
+
+    tags: list[str] = []
+    fios: list[str] = []
+
+    for row in data:
+        if max(i_fio, i_tag, i_dir, i_start, i_end) >= len(row):
+            continue
+
+        if row[i_dir].strip() != "ВШМ":
+            continue
+
+        if row[i_end].strip():
+            continue
+
+        start_dt = _parse_dt(row[i_start], fallback_date=row[i_start])
+        if not start_dt:
+            start_dt = _parse_dt(row[i_start])
+        if not start_dt:
+            continue
+
+        if timedelta(0) <= (now - start_dt) <= window:
+            tag = row[i_tag].strip()
+            fio = row[i_fio].strip()
+            if tag and fio:
+                tags.append(tag)
+                fios.append(fio)
+
+    return tags, fios
