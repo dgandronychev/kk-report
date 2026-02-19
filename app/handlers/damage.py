@@ -8,8 +8,11 @@ from typing import Dict, List, Optional, Set
 
 from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
 from app.utils.gsheets import load_damage_reference_data, write_in_answers_ras
+from app.utils.drive_zip import safe_zip_name, build_zip_from_max_attachments, upload_zip_private
 from app.utils.helper import get_fio_async
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
+from app.config import GOOGLE_DRIVE_CREDS_JSON, GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +181,13 @@ def _find_car_mark(company: str, grz: str) -> str:
             return str(row[model_idx]).strip()
     return ""
 
+def _find_yandex_park(grz: str) -> str:
+    _, car_rows = _rows_by_company("Яндекс")
+    needle = str(grz or "").strip().lower()
+    for row in car_rows:
+        if len(row) > 2 and str(row[0]).strip().lower() == needle:
+            return str(row[2]).strip()
+    return ""
 
 def _find_grz_matches(company: str, prefix: str) -> list[str]:
     _, car_rows = _rows_by_company(company)
@@ -243,6 +253,26 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     username = f"@{data.get('username') or user_id}"
     report = _render_report(data, fio, username)
+
+    if data.get("company") == "Белка":
+        is_damage_path = not (
+                    data.get("type") == "check" and data.get("sost_disk") == "Ок" and data.get("sost_rez") == "Ок")
+        if is_damage_path:
+            try:
+                zip_name = safe_zip_name(data.get("grz", ""))
+                zip_path = await build_zip_from_max_attachments(flow.files)
+                loop = asyncio.get_running_loop()
+                file_id = await loop.run_in_executor(
+                    None,
+                    upload_zip_private,
+                    zip_path,
+                    zip_name,
+                    GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID,
+                    GOOGLE_DRIVE_CREDS_JSON,
+                )
+                logger.info("[drive][belka_damage] uploaded zip name=%s file_id=%s", zip_name, file_id)
+            except Exception:
+                logger.exception("[drive][belka_damage] zip upload failed")
 
     response = await send_message(chat_id=_company_chat_id(data["company"]), text=report, attachments=flow.files)
     msg_ref = ""
@@ -499,6 +529,10 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
             return True
         flow.data["type_disk"] = t
+        if flow.data.get("company") == "Яндекс":
+            park_ts = _find_yandex_park(flow.data.get("grz", ""))
+            if park_ts:
+                await _send_flow_text(flow, chat_id, f"Данное ТС в парке {park_ts}")
         flow.step = "sost_disk"
         await _ask(flow, chat_id, "Состояние диска:", _KEY_CONDITION)
         return True

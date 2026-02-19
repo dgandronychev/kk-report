@@ -332,6 +332,9 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
     if await try_handle_nomenclature_step(_nomenclature, user_id, chat_id, t, msg):
         return
+    if await try_handle_open_gate_step(_open_gate, user_id, chat_id, t, msg):
+        return
+
 
     # 2) Команды
     if not t:
@@ -383,7 +386,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_nomenclature(_nomenclature, user_id, chat_id, username)
         return
-    if await try_handle_open_gate_step(_open_gate, user_id, chat_id, t, msg):
+    if t == "/open_gate":
+        await cmd_open_gate(_open_gate, user_id, chat_id, msg)
         return
 
 
