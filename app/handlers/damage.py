@@ -211,26 +211,41 @@ def _company_chat_id(company: str) -> int:
 
 
 def _render_report(data: dict, fio: str, username: str) -> str:
-    lines = [
-        f"⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}",
-        "",
-        f"👷 {username}",
-        fio,
-        "",
-        f"#Компания_{data['company'].replace(' ', '_')}",
-        f"#Тип_{data['vid_kolesa'].replace(' ', '_')}",
-        f"#ГРЗ_{data.get('grz','б/н')}",
-        f"#Авто_{data.get('marka_ts','')}",
-        f"#Размер_{data['razmer']}/{data['radius']}",
-        f"#Резина_{data['marka_rez']} {data['model_rez']}",
-        f"#Сезон_{data['sezon'].replace(' ', '_')}",
-        f"#Диск_{data['type_disk'].replace(' ', '_')}",
-        f"#Сост_диск_{data['sost_disk'].replace(' ', '_')}",
-        f"#Причина_диск_{data.get('sost_disk_prich','').replace(' ', '_')}",
-        f"#Сост_резина_{data['sost_rez'].replace(' ', '_')}",
-        f"#Причина_резина_{data.get('sost_rez_prich','').replace(' ', '_')}",
-    ]
-    return "\n".join(lines)
+    report = ""
+    report += f"⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+    if data.get("marka_ts"):
+        report += f"🚗 {data['marka_ts']}\n"
+    if data.get("grz"):
+        report += f"#️⃣ {data['grz']}\n"
+    report += f"👷 {username}\n"
+    if fio:
+        report += f"{fio}\n"
+    report += "\n"
+    report += f"🛞 {data['vid_kolesa']}\n"
+    report += f"{data['marka_rez']} {data['model_rez']}\n"
+    report += f"{data['razmer']}/{data['radius']}\n"
+
+    season = str(data.get("sezon", ""))
+    if season.startswith("Лето"):
+        report += f"☀️ {season}\n"
+    elif season.startswith("Зима"):
+        report += f"❄️ {season}\n"
+    else:
+        report += f"{season}\n"
+
+    if data.get("type_disk"):
+        report += f"{data['type_disk']}\n\n"
+        report += f"🛞 Состояние диска:\n#{data.get('sost_disk', '').replace(' ', '_')}\n"
+
+    if data.get("sost_disk_prich"):
+        report += f"#{data['sost_disk_prich'].replace(' ', '_')}\n"
+
+    report += f"\n🛞 Состояние резины:\n#{data.get('sost_rez', '').replace(' ', '_')}\n"
+    if data.get("sost_rez_prich"):
+        report += f"#{data['sost_rez_prich'].replace(' ', '_')}\n"
+
+    report += f"#{data['company']}"
+    return report
 
 
 async def cmd_damage(st: DamageState, user_id: int, chat_id: int, username: str) -> None:
@@ -242,6 +257,29 @@ async def cmd_damage(st: DamageState, user_id: int, chat_id: int, username: str)
 def _clear(st: DamageState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
 
+
+async def send_files_prompt(flow: DamageFlow, chat_id: int, text: str) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=text,
+        button_texts=["Готово", "Выход"],
+        button_payloads=["damage_done", "damage_exit"],
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
+async def warmup_damage_refs() -> None:
+    await _ensure_refs_loaded()
+
+
+def reset_damage_progress(st: DamageState, user_id: int) -> None:
+    _clear(st, user_id)
 
 async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> bool:
     flow = st.flows_by_user[user_id]
@@ -565,7 +603,7 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
         if t == "Ок":
             flow.data["sost_rez_prich"] = ""
             flow.step = "files"
-            await _ask(flow, chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
+            await send_files_prompt(flow, chat_id, "Прикрепите файлы и нажмите «Готово»")
             return True
         flow.step = "sost_rez_prich"
         reasons = _KEY_REASON_TIRE_UTIL if t == "Утиль" else _KEY_REASON_TIRE_REPAIR
@@ -575,16 +613,16 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
     if step == "sost_rez_prich":
         flow.data["sost_rez_prich"] = t
         flow.step = "files"
-        await _ask(flow, chat_id, "Прикрепите файлы и нажмите «Готово»", ["Готово"])
+        await send_files_prompt(flow, chat_id, "Прикрепите файлы и нажмите «Готово»")
         return True
 
     if step == "files":
-        if _normalize(t) == "готово":
+        if controls & {"готово", "damage_done"}:
             return await _finalize(st, user_id, chat_id, msg)
 
         attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
         if not attachments:
-            await _ask(flow, chat_id, "Прикрепите минимум 1 файл и нажмите «Готово»", ["Готово"])
+            await send_files_prompt(flow, chat_id, "Прикрепите минимум 1 файл и нажмите «Готово»")
             return True
 
         added = 0
@@ -595,7 +633,7 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
             flow.file_keys.add(key)
             flow.files.append(item)
             added += 1
-        await _send_flow_text(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}")
+        await send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}")
         return True
 
     return True

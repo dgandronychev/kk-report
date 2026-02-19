@@ -52,6 +52,9 @@ def _clear_flow(st: WorkShiftState, user_id: int, chat_id: int) -> None:
         st.active_user_by_chat.pop(chat_id, None)
     st.prompt_msg_id_by_user.pop(user_id, None)
 
+def reset_work_shift_progress(st: WorkShiftState, user_id: int, chat_id: int) -> None:
+    _clear_flow(st, user_id, chat_id)
+
 def _extract_user_label(msg: dict, user_id: int) -> str:
     sender = msg.get("sender") or {}
     username = sender.get("username") or sender.get("first_name") or str(user_id)

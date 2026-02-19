@@ -125,6 +125,12 @@ async def _ensure_refs_loaded() -> None:
 def _clear(st: SoberiState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
 
+async def warmup_soberi_refs() -> None:
+    await _ensure_refs_loaded()
+
+
+def reset_soberi_progress(st: SoberiState, user_id: int) -> None:
+    _clear(st, user_id)
 
 async def _send_flow_text(flow: SoberiFlow, chat_id: int, text: str) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
@@ -253,10 +259,10 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
         data["type_soberi"] = t
         if data.get("preset_company"):
             flow.step = "marka_ts"
-            await _ask(flow, cchat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
+            await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
             return True
         flow.step = "company"
-        await _ask(flow, cchat_id, "Компания:", _KEY_COMPANY)
+        await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
         return True
 
     if controls & {"назад", "soberi_back"}:

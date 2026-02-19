@@ -18,6 +18,9 @@ class OpenGateState:
     waiting_confirm_users: set[int] = field(default_factory=set)
     company_by_user: Dict[int, str] = field(default_factory=dict)
 
+def reset_open_gate_progress(st: OpenGateState, user_id: int) -> None:
+    st.waiting_confirm_users.discard(user_id)
+    st.company_by_user.pop(user_id, None)
 
 async def cmd_open_gate(st: OpenGateState, user_id: int, chat_id: int, msg: dict) -> None:
     st.waiting_confirm_users.add(user_id)

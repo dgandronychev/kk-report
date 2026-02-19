@@ -97,6 +97,12 @@ async def _send_flow_text(flow: NomenclatureFlow, chat_id: int, text: str) -> No
 def _clear(st: NomenclatureState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
 
+async def warmup_nomenclature_refs() -> None:
+    await _ensure_refs_loaded()
+
+
+def reset_nomenclature_progress(st: NomenclatureState, user_id: int) -> None:
+    _clear(st, user_id)
 
 async def cmd_nomenclature(st: NomenclatureState, user_id: int, chat_id: int, username: str) -> None:
     if NOMENCLATURE_ALLOWED_USER_IDS and user_id not in NOMENCLATURE_ALLOWED_USER_IDS:

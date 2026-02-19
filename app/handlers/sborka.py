@@ -201,29 +201,50 @@ def _company_chat(company: str) -> int:
 
 
 def _render_report(data: dict, fio: str, username: str) -> str:
-    prefix = ""
+    report = ""
     if data.get("type") == "check":
         if data.get("type_kolesa") == "Ось":
-            prefix = "Проверка готовой оси\n\n"
+            report += "Проверка готовой оси\n\n"
         elif data.get("type_kolesa") == "Комплект":
-            prefix = "Проверка готового комплекта\n\n"
+            report += "Проверка готового комплекта\n\n"
         else:
-            prefix = "Проверка готового колеса\n\n"
+            report += "Проверка готового колеса\n\n"
 
-    return (
-        f"{prefix}⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-        f"👷 {username}\n\n"
-        f"🚗 {data['marka_ts']}\n\n"
-        f"🛞 {data['marka_rez']} {data['model_rez']}\n\n"
-        f"{data['razmer']}/{data['radius']}\n"
-        f"{data['sezon']}\n"
-        f"{data['type_disk']}\n"
-        f"{data['type_kolesa']}\n"
-        f"\n#{data['company']}\n"
-        f"\n📝 Сбор под заявку: {data['zayavka']}\n"
-        f"\n#️⃣ Номер заявки: {data.get('nomer_sborka','')}\n"
-        f"\n{fio}"
-    )
+    report += f"⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+    report += f"👷 {username}\n"
+    if fio:
+        report += f"{fio}\n"
+    report += "\n"
+    report += f"🚗 {data['marka_ts']}\n\n"
+    report += f"🛞 {data['marka_rez']} {data['model_rez']}\n\n"
+    report += f"{data['razmer']}/{data['radius']}\n"
+
+    season = str(data.get("sezon", ""))
+    if season.startswith("Лето"):
+        report += f"☀️ {season}\n"
+    elif season.startswith("Зима"):
+        report += f"❄️ {season}\n"
+    else:
+        report += f"{season}\n"
+
+    report += f"{data['type_disk']}\n"
+
+    wheel_type = str(data.get("type_kolesa", ""))
+    if wheel_type == "Левое":
+        report += "⬅️ Левое\n"
+    elif wheel_type == "Правое":
+        report += "➡️ Правое\n"
+    elif wheel_type == "Ось":
+        report += "↔️ Ось\n"
+    elif wheel_type == "Комплект":
+        report += "🔄 Комплект\n"
+    elif wheel_type:
+        report += f"{wheel_type}\n"
+
+    report += f"\n#{data['company']}\n"
+    report += f"\n📝 Сбор под заявку: {data['zayavka']}\n"
+    report += f"\n#️⃣ Номер заявки: {data.get('nomer_sborka', '')}\n"
+    return report
 
 
 async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str, cmd: str = "sborka") -> None:
@@ -239,6 +260,28 @@ async def cmd_sborka(st: SborkaState, user_id: int, chat_id: int, username: str,
 def _clear(st: SborkaState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
 
+async def warmup_sborka_refs() -> None:
+    await _ensure_refs_loaded()
+
+
+def reset_sborka_progress(st: SborkaState, user_id: int) -> None:
+    _clear(st, user_id)
+
+
+async def _send_files_prompt(flow: SborkaFlow, chat_id: int, text: str) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
+        chat_id,
+        text,
+        ["Готово", "Выход"],
+        ["sborka_done", "sborka_exit"],
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
 
 def _write_sborka_rows(data: dict, message_ref: str, username: str) -> None:
     base = [
@@ -617,18 +660,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
     if step == "nomer":
         flow.data["nomer_sborka"] = t or "не найден"
         flow.step = "files"
-        prev_msg_id = flow.data.get("prompt_msg_id")
-        if prev_msg_id:
-            await delete_message(chat_id, prev_msg_id)
-        response = await send_text_with_reply_buttons(
-           chat_id,
-            "Прикрепите фото/видео/файл и нажмите «Готово».",
-            ["Готово", "Выход"],
-            ["sborka_done", "sborka_exit"],
-        )
-        msg_id = extract_message_id(response)
-        if msg_id:
-            flow.data["prompt_msg_id"] = msg_id
+        await _send_files_prompt(flow, chat_id, "Прикрепите фото/видео/файл и нажмите «Готово»")
         return True
 
     if step == "files":
@@ -645,20 +677,10 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
                 flow.file_keys.add(key)
                 flow.files.append(item)
                 new_items += 1
-            await _send_flow_text(flow, chat_id, f"Файлов добавлено: {new_items}. Текущее количество: {len(flow.files)}")
+            await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {new_items}. Текущее количество: {len(flow.files)}")
             return True
 
-        prev_msg_id = flow.data.get("prompt_msg_id")
-        if prev_msg_id:
-            await delete_message(chat_id, prev_msg_id)
-        response = await send_text_with_reply_buttons(            chat_id,
-            "Прикрепите файлы и нажмите «Готово».",
-            ["Готово", "Выход"],
-            ["sborka_done", "sborka_exit"],
-        )
-        msg_id = extract_message_id(response)
-        if msg_id:
-            flow.data["prompt_msg_id"] = msg_id
+        await _send_files_prompt(flow, chat_id, "Прикрепите файлы и нажмите «Готово»")
         return True
 
     return True

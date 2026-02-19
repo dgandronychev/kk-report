@@ -11,6 +11,8 @@ from app.utils.helper import normalize_phone, post_registration_async
 class RegistrationState:
     wait_phone_users: Set[int]
 
+def reset_registration_progress(st: RegistrationState, user_id: int) -> None:
+    st.wait_phone_users.discard(user_id)
 
 async def cmd_registration(st: RegistrationState, user_id: int, chat_id: int) -> None:
     st.wait_phone_users.add(user_id)

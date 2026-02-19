@@ -20,13 +20,14 @@ from app.handlers.registration import (
     RegistrationState,
     cmd_registration,
     try_handle_phone_step,
+    reset_registration_progress,
 )
 from app.handlers import work_shift
-from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step
-from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step
-from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step
-from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step
-from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step
+from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step, reset_damage_progress, warmup_damage_refs
+from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step, reset_sborka_progress, warmup_sborka_refs
+from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step, reset_soberi_progress, warmup_soberi_refs
+from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step, reset_nomenclature_progress, warmup_nomenclature_refs
+from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step, reset_open_gate_progress
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,28 @@ def _is_private_chat(msg: dict, chat_id: int, user_id: int) -> bool:
     # Fallback: в личке chat_id часто совпадает с user_id.
     return chat_id == user_id
 
+async def _warmup_caches() -> None:
+    try:
+        await asyncio.gather(
+            warmup_damage_refs(),
+            warmup_sborka_refs(),
+            warmup_soberi_refs(),
+            warmup_nomenclature_refs(),
+        )
+        logging.info("reference caches warmed up")
+    except Exception:
+        logging.exception("failed to warm up reference caches")
+
+
+def _reset_user_progress(user_id: int, chat_id: int) -> None:
+    reset_registration_progress(_reg, user_id)
+    reset_damage_progress(_damage, user_id)
+    reset_sborka_progress(_sborka, user_id)
+    reset_soberi_progress(_soberi, user_id)
+    reset_nomenclature_progress(_nomenclature, user_id)
+    reset_open_gate_progress(_open_gate, user_id)
+    work_shift.reset_work_shift_progress(_shift, user_id, chat_id)
+
 # ===== Routing =====
 async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     t = text.strip()
@@ -310,14 +333,21 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "open_gate": "/open_gate",
         "открыть ворота": "/open_gate",
     }
-
+    is_command = False
     if t:
         normalized = t.strip().lower()
         if normalized.startswith("/"):
             normalized = normalized[1:]
+            is_command = True
         normalized = normalized.split("@", 1)[0].strip()
         normalized = re.sub(r"\s+", "_", normalized)
-        t = aliases.get(normalized, t)
+        mapped = aliases.get(normalized)
+        if mapped:
+            t = mapped
+            is_command = True
+
+    if is_command:
+        _reset_user_progress(user_id, chat_id)
 
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
     if await try_handle_phone_step(_reg, user_id, chat_id, t, msg):
@@ -483,6 +513,11 @@ def run() -> None:
 
     # Periodic notifications (logistics + report reminders)
     start_schedulers()
+
+    try:
+        asyncio.run(_warmup_caches())
+    except Exception:
+        logging.exception("warmup stage crashed")
 
     # Polling в основном потоке
     asyncio.run(_polling_loop())
