@@ -28,6 +28,14 @@ from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step,
 from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step, reset_soberi_progress, warmup_soberi_refs
 from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step, reset_nomenclature_progress, warmup_nomenclature_refs
 from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step, reset_open_gate_progress
+from app.handlers.finance import (
+    FinanceState,
+    cmd_parking,
+    cmd_zapravka,
+    cmd_expense,
+    try_handle_finance_step,
+    reset_finance_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +47,7 @@ _sborka = SborkaState()
 _soberi = SoberiState()
 _nomenclature = NomenclatureState()
 _open_gate = OpenGateState()
+_finance = FinanceState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -306,6 +315,7 @@ def _reset_user_progress(user_id: int, chat_id: int) -> None:
     reset_soberi_progress(_soberi, user_id)
     reset_nomenclature_progress(_nomenclature, user_id)
     reset_open_gate_progress(_open_gate, user_id)
+    reset_finance_progress(_finance, user_id)
     work_shift.reset_work_shift_progress(_shift, user_id, chat_id)
 
 # ===== Routing =====
@@ -332,6 +342,12 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "окончание смены": "/end_work_shift",
         "open_gate": "/open_gate",
         "открыть ворота": "/open_gate",
+        "parking": "/parking",
+        "zapravka": "/zapravka",
+        "expense": "/expense",
+        "парковка": "/parking",
+        "заправка": "/zapravka",
+        "расход": "/expense",
     }
     is_command = False
     if t:
@@ -363,6 +379,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await try_handle_nomenclature_step(_nomenclature, user_id, chat_id, t, msg):
         return
     if await try_handle_open_gate_step(_open_gate, user_id, chat_id, t, msg):
+        return
+    if await try_handle_finance_step(_finance, user_id, chat_id, t, msg):
         return
 
 
@@ -418,6 +436,21 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
     if t == "/open_gate":
         await cmd_open_gate(_open_gate, user_id, chat_id, msg)
+        return
+    if t == "/parking":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_parking(_finance, user_id, chat_id, username, msg)
+        return
+    if t == "/zapravka":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_zapravka(_finance, user_id, chat_id, username, msg)
+        return
+    if t == "/expense":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_expense(_finance, user_id, chat_id, username, msg)
         return
 
 

@@ -7,7 +7,7 @@ from typing import Optional
 import httpx
 import requests
 
-from app.config import URL_GET_FIO, URL_REGISTRASHION
+from app.config import URL_GET_FIO, URL_GET_INFO_TASK, URL_REGISTRASHION
 
 
 def normalize_phone(s: str) -> Optional[str]:
@@ -143,3 +143,26 @@ async def get_fio_async(max_chat_id: int, user_id: int, msg: Optional[dict] = No
         return fallback
 
     return fallback
+
+async def get_open_tasks_async(max_chat_id: int) -> list[dict]:
+    if not URL_GET_INFO_TASK:
+        return []
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(URL_GET_INFO_TASK, params={"chat_id": str(max_chat_id)})
+
+        response.raise_for_status()
+        parsed = response.json()
+    except Exception:
+        return []
+
+    if isinstance(parsed, list):
+        return [row for row in parsed if isinstance(row, dict)]
+
+    if isinstance(parsed, dict):
+        tasks = parsed.get("active_tasks") or parsed.get("tasks") or []
+        if isinstance(tasks, list):
+            return [row for row in tasks if isinstance(row, dict)]
+
+    return []

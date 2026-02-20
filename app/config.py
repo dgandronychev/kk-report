@@ -14,6 +14,7 @@ HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 LOGS_DIR = "logs"
 URL_REGISTRASHION = "https://stage.app.clean-car.net/api/v1/bots/max_information/update/"
 URL_GET_FIO = "https://stage.app.clean-car.net/api/v1/bots/accident/retrieve/",
+URL_GET_INFO_TASK = "https://stage.app.clean-car.net/api/v1/bots/open_tasks/list/"
 
 LOGISTICS_CHAT_IDS = "-70635401257012,-70646361948407,-70637799415860"
 REPORT_CHAT_ID = "199909595"
