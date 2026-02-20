@@ -72,7 +72,7 @@ def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
     return ["Выход"], ["damage_exit"]
 
 
-async def _send_flow_text(flow: NomenclatureFlow, chat_id: int, text: str) -> None:
+async def _send_flow_text(flow: DamageFlow, chat_id: int, text: str) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
         await delete_message(chat_id, prev_msg_id)
@@ -364,6 +364,11 @@ async def _handle_back(flow: DamageFlow, chat_id: int) -> bool:
         await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
         return True
 
+    if step == "grz_confirm":
+        flow.step = "grz"
+        await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
+        return True
+
     if step == "marka_ts":
         flow.step = "grz"
         await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
@@ -494,12 +499,23 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
     if step == "grz":
         matches = _find_grz_matches(flow.data["company"], t)
         flow.data["grz"] = t
-        flow.step = "marka_ts"
         if matches:
+            flow.step = "grz_confirm"
             await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
             return True
+        flow.step = "marka_ts"
         await _send_flow_text(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
         marka = _find_car_mark(flow.data["company"], t)
+        if marka:
+            await _send_flow_text(flow, chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
+        else:
+            await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
+        return True
+
+    if step == "grz_confirm":
+        flow.data["grz"] = t
+        marka = _find_car_mark(flow.data["company"], t)
+        flow.step = "marka_ts"
         if marka:
             await _send_flow_text(flow, chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
         else:
