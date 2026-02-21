@@ -131,7 +131,7 @@ async def get_fio_async(max_chat_id: int, user_id: int, msg: Optional[dict] = No
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(URL_GET_FIO, params={"chat_id": str(max_chat_id)})
+            response = await client.get(URL_GET_FIO, params={"max_chat_id": str(max_chat_id)})
 
         response.raise_for_status()
         parsed = response.json()

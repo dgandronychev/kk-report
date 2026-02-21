@@ -13,7 +13,7 @@ HTTP_PORT = int(os.environ.get("HTTP_PORT", "8080"))
 
 LOGS_DIR = "logs"
 URL_REGISTRASHION = "https://stage.app.clean-car.net/api/v1/bots/max_information/update/"
-URL_GET_FIO = "https://stage.app.clean-car.net/api/v1/bots/accident/retrieve/",
+URL_GET_FIO = "https://stage.app.clean-car.net/api/v2/bots/accident/retrieve/",
 URL_GET_INFO_TASK = "https://stage.app.clean-car.net/api/v1/bots/open_tasks/list/"
 
 LOGISTICS_CHAT_IDS = "-70635401257012,-70646361948407,-70637799415860"
@@ -39,6 +39,10 @@ WELCOME_TEXT = (
     "Здравствуйте, это бот компании КлинКар\n\n"
     "Для начала работы пройдите регистрацию по команде /registration"
 )
+
+
+POR_NOMER_DIS = int(os.environ.get("POR_NOMER_DIS", "13"))
+POR_NOMER_REZ = int(os.environ.get("POR_NOMER_REZ", "16"))
 
 def _parse_user_ids_csv(value: str) -> set[int]:
     out: set[int] = set()

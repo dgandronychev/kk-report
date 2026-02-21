@@ -192,6 +192,39 @@ def get_max_nomer_sborka() -> int:
                 numbers.append(int(num))
     return max(numbers) if numbers else 0
 
+def get_number_util(company: str, column_index: int) -> str:
+    """Возвращает следующий порядковый номер утиля по компании.
+
+    column_index: индекс колонки в листе "Выгрузка ремонты/утиль"
+    (для диска/резины используются разные колонки).
+    """
+    gc: Client = gspread.service_account("app/creds.json")
+    sh = gc.open_by_url(GSPREAD_URL_ANSWER)
+    ws = sh.worksheet("Выгрузка ремонты/утиль")
+    rows = ws.get_all_values()[1:]
+
+    values: list[str] = []
+    for row in rows:
+        if len(row) > column_index and row[column_index]:
+            values.append(str(row[column_index]).strip())
+
+    if company == "СитиДрайв":
+        prefix = "su"
+    elif company == "Яндекс":
+        prefix = "yu"
+    else:
+        prefix = "blk"
+
+    nums: list[int] = []
+    for value in values:
+        if not value.startswith(prefix):
+            continue
+        num = re.sub(r"[^0-9]", "", value)
+        if num:
+            nums.append(int(num))
+
+    next_num = (max(nums) + 1) if nums else 1
+    return f"{prefix}{next_num}"
 
 def write_soberi_in_google_sheets_rows(rows: list[list[str]]) -> None:
     sh = _open_sklad_sheet()

@@ -7,11 +7,11 @@ import logging
 from typing import Dict, List, Optional, Set
 
 from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
-from app.utils.gsheets import load_damage_reference_data, write_in_answers_ras
+from app.utils.gsheets import get_number_util, load_damage_reference_data, write_in_answers_ras
 from app.utils.drive_zip import safe_zip_name, build_zip_from_max_attachments, upload_zip_private
 from app.utils.helper import get_fio_async
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
-from app.config import GOOGLE_DRIVE_CREDS_JSON, GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID
+from app.config import GOOGLE_DRIVE_CREDS_JSON, GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID, POR_NOMER_DIS, POR_NOMER_REZ
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -210,16 +210,15 @@ def _company_chat_id(company: str) -> int:
     return int(DAMAGE_CHAT_ID_BELKA)
 
 
-def _render_report(data: dict, fio: str, username: str) -> str:
+def _render_report(data: dict, fio: str) -> str:
     report = ""
     report += f"⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}\n\n"
     if data.get("marka_ts"):
         report += f"🚗 {data['marka_ts']}\n"
     if data.get("grz"):
         report += f"#️⃣ {data['grz']}\n"
-    report += f"👷 {username}\n"
     if fio:
-        report += f"{fio}\n"
+        report += f"👷 {fio}\n"
     report += "\n"
     report += f"🛞 {data['vid_kolesa']}\n"
     report += f"{data['marka_rez']} {data['model_rez']}\n"
@@ -239,10 +238,14 @@ def _render_report(data: dict, fio: str, username: str) -> str:
 
     if data.get("sost_disk_prich"):
         report += f"#{data['sost_disk_prich'].replace(' ', '_')}\n"
+    if data.get("por_nomer_diska"):
+        report += f"#{data['por_nomer_diska'].replace(' ', '_')}\n"
 
     report += f"\n🛞 Состояние резины:\n#{data.get('sost_rez', '').replace(' ', '_')}\n"
     if data.get("sost_rez_prich"):
         report += f"#{data['sost_rez_prich'].replace(' ', '_')}\n"
+    if data.get("por_nomer_rezina"):
+        report += f"#{data['por_nomer_rezina'].replace(' ', '_')}\n"
 
     report += f"#{data['company']}"
     return report
@@ -332,8 +335,22 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
 
     data = flow.data
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    username = f"@{data.get('username') or user_id}"
-    report = _render_report(data, fio, username)
+    try:
+        if data.get("sost_disk") == "Утиль":
+            data["por_nomer_diska"] = get_number_util(data.get("company", ""), POR_NOMER_DIS)
+        else:
+            data["por_nomer_diska"] = ""
+
+        if data.get("sost_rez") == "Утиль":
+            data["por_nomer_rezina"] = get_number_util(data.get("company", ""), POR_NOMER_REZ)
+        else:
+            data["por_nomer_rezina"] = ""
+    except Exception:
+        logger.exception("failed to get util serial number for damage")
+        await _send_flow_text(flow, chat_id, "Не удалось получить порядковый номер утиля. Попробуйте чуть позже.")
+        return True
+
+    report = _render_report(data, fio)
 
     if data.get("company") == "Белка":
         is_damage_path = not (
@@ -374,12 +391,12 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         data["type_disk"],
         data["sost_disk"],
         data.get("sost_disk_prich", ""),
-        "",
+        data.get("por_nomer_diska", ""),
         data["sost_rez"],
         data.get("sost_rez_prich", ""),
-        "",
+        data.get("por_nomer_rezina", ""),
         msg_ref,
-        username,
+        "",
     ]
     try:
         write_in_answers_ras(row, "Выгрузка ремонты/утиль")

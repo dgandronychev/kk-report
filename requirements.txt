@@ -6,3 +6,5 @@ python-multipart==0.0.9
 pydantic==2.8.2
 gspread==6.1.2
 google-auth==2.34.0
+google-api-python-client==2.149.0
+google-auth-httplib2==0.2.0
