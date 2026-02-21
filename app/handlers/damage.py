@@ -382,10 +382,9 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
 
     response = await send_message(chat_id=_company_chat_id(data["company"]), text=report, attachments=flow.files)
     msg_ref = ""
-    if isinstance(response, dict):
-        message_id = str(response.get("message_id") or response.get("id") or "")
-        if message_id:
-            msg_ref = f"max://chat/{_company_chat_id(data['company'])}/message/{message_id}"
+    message_id = extract_message_id(response if isinstance(response, dict) else None)
+    if message_id:
+        msg_ref = f"max://chat/{_company_chat_id(data['company'])}/message/{message_id}"
 
     row = [
         (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
@@ -406,7 +405,7 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         data.get("sost_rez_prich", ""),
         data.get("por_nomer_rezina", ""),
         msg_ref,
-        "",
+        fio,
     ]
     try:
         write_in_answers_ras(row, "Выгрузка ремонты/утиль")

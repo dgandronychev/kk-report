@@ -96,8 +96,8 @@ def upload_zip_private(zip_path, zip_name, folder_id, creds_json_path):
         from googleapiclient.http import MediaFileUpload
         from googleapiclient.errors import HttpError
     except ModuleNotFoundError:
-        logger.warning("[drive_zip] google-api-python-client is not installed, zip upload skipped")
-        return ""
+        logger.warning("[drive_zip] google-api-python-client is not installed, fallback upload via Drive REST API")
+        return _upload_zip_private_via_http(zip_path, zip_name, folder_id, creds_json_path)
 
 
     drive = _drive_service(creds_json_path)
@@ -116,3 +116,63 @@ def upload_zip_private(zip_path, zip_name, folder_id, creds_json_path):
     except HttpError as e:
         content = e.content.decode("utf-8", errors="replace") if hasattr(e, "content") else str(e)
         raise RuntimeError(f"Drive upload failed: status={e.status_code} content={content}") from e
+
+def _upload_zip_private_via_http(zip_path: str, zip_name: str, folder_id: str, creds_json_path: str) -> str:
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+    except ModuleNotFoundError:
+        logger.warning("[drive_zip] google-auth is not installed, zip upload skipped")
+        return ""
+
+    scopes = ["https://www.googleapis.com/auth/drive"]
+    creds = service_account.Credentials.from_service_account_file(
+        creds_json_path,
+        scopes=scopes,
+    )
+    creds.refresh(Request())
+
+    metadata = {
+        "name": zip_name,
+        "parents": [folder_id],
+    }
+
+    with open(zip_path, "rb") as fp:
+        file_data = fp.read()
+
+    boundary = "drive-zip-boundary"
+    metadata_json = json.dumps(metadata, ensure_ascii=False).encode("utf-8")
+    body = b"\r\n".join(
+        [
+            f"--{boundary}".encode("ascii"),
+            b"Content-Type: application/json; charset=UTF-8",
+            b"",
+            metadata_json,
+            f"--{boundary}".encode("ascii"),
+            b"Content-Type: application/zip",
+            b"",
+            file_data,
+            f"--{boundary}--".encode("ascii"),
+            b"",
+        ]
+    )
+
+    headers = {
+        "Authorization": f"Bearer {creds.token}",
+        "Content-Type": f"multipart/related; boundary={boundary}",
+    }
+
+    upload_url = "https://www.googleapis.com/upload/drive/v3/files"
+    params = {
+        "uploadType": "multipart",
+        "fields": "id",
+        "supportsAllDrives": "true",
+    }
+    response = httpx.post(upload_url, params=params, headers=headers, content=body, timeout=120)
+    if not response.is_success:
+        raise RuntimeError(
+            f"Drive fallback upload failed: status={response.status_code} content={response.text[:1000]}"
+        )
+
+    result = response.json()
+    return str(result.get("id") or "")

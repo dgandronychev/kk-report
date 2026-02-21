@@ -127,23 +127,17 @@ def _fallback_fio(msg: dict, user_id: int) -> str:
 
 async def get_fio_async(max_chat_id: int, user_id: int, msg: Optional[dict] = None) -> str:
     fallback = _fallback_fio(msg or {}, user_id)
-    logger.info("[get_fio_async] request started | user_id=%s chat_id=%s url=%s", user_id, max_chat_id, URL_GET_FIO)
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(URL_GET_FIO, params={"max_chat_id": str(max_chat_id)})
 
-        logger.info("[get_fio_async] response received | user_id=%s chat_id=%s status=%s", user_id, max_chat_id,
-                    response.status_code)
         response.raise_for_status()
         parsed = response.json()
 
         fio = _extract_fio_from_payload(parsed)
         if fio:
-            logger.info("[get_fio_async] fio resolved from backend | user_id=%s chat_id=%s fio=%s", user_id,
-                        max_chat_id, fio)
             return fio
-        logger.warning("[get_fio_async] backend returned no fio fields, fallback will be used | user_id=%s chat_id=%s",
-                       user_id, max_chat_id)
+
     except Exception:
         logger.exception("[get_fio_async] request failed, fallback will be used | user_id=%s chat_id=%s", user_id,
                          max_chat_id)
