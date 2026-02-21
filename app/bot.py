@@ -474,7 +474,7 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /soberi_belka, /nomenclature, /open_gate")
+    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /open_gate")
 
 async def _polling_loop() -> None:
     marker: Optional[int] = None
