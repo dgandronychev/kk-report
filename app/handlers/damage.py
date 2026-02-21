@@ -422,9 +422,14 @@ async def _handle_back(flow: DamageFlow, chat_id: int) -> bool:
 
     if step == "radius":
         if flow.data.get("vid_kolesa") == "В сборе":
+            if flow.data.get("marka_ts_from_base"):
+                flow.step = "grz_confirm"
+                options = _find_grz_matches(company, flow.data.get("grz", ""))[:20]
+                await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", options)
+                return True
+
             flow.step = "marka_ts"
-            options = _find_grz_matches(company, flow.data.get("grz", ""))[:20]
-            await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", options)
+            await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
             return True
         flow.step = "wheel_type"
         await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
@@ -553,23 +558,36 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
         await _send_flow_text(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
         marka = _find_car_mark(flow.data["company"], t)
         if marka:
-            await _send_flow_text(flow, chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
+            flow.data["marka_ts"] = marka
+            flow.data["marka_ts_from_base"] = True
+            flow.step = "radius"
+            await _send_flow_text(flow, chat_id,
+                                  f"Марка автомобиля (из базы): {marka}. Если нужно, можно изменить позже через «Назад».")
+            await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         else:
+            flow.data["marka_ts_from_base"] = False
             await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
         return True
 
     if step == "grz_confirm":
         flow.data["grz"] = t
         marka = _find_car_mark(flow.data["company"], t)
-        flow.step = "marka_ts"
         if marka:
-            await _send_flow_text(flow, chat_id, f"Марка автомобиля (из базы): {marka}. Можете отправить другую вручную.")
+            flow.data["marka_ts"] = marka
+            flow.data["marka_ts_from_base"] = True
+            flow.step = "radius"
+            await _send_flow_text(flow, chat_id,
+                                  f"Марка автомобиля (из базы): {marka}. Если нужно, можно изменить позже через «Назад».")
+            await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         else:
+            flow.data["marka_ts_from_base"] = False
+            flow.step = "marka_ts"
             await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
         return True
 
     if step == "marka_ts":
         flow.data["marka_ts"] = t
+        flow.data["marka_ts_from_base"] = False
         flow.step = "radius"
         await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
         return True
