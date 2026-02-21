@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import asyncio
 import logging
 from typing import Any, Optional
@@ -7,6 +8,9 @@ from typing import Any, Optional
 import httpx
 
 from app.config import API_BASE, HEADERS
+
+_MAX_INLINE_KEYBOARD_ROWS = 30
+_MAX_INLINE_BUTTONS_PER_ROW = 4
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +59,7 @@ async def send_text_with_reply_buttons(
     if button_payloads is not None and len(button_payloads) != len(button_texts):
         raise ValueError("button_payloads length should match button_texts length")
 
-    callback_rows = []
+    callback_buttons = []
     for idx, button_text in enumerate(button_texts):
         text_value = str(button_text).strip()
         payload_raw = button_payloads[idx] if button_payloads else button_text
@@ -67,15 +71,25 @@ async def send_text_with_reply_buttons(
                 payload_raw,
             )
             continue
-        callback_rows.append(
-            [
-                {
-                    "type": "callback",
-                    "text": button_text,
-                    "payload": payload_value,
-                }
-            ]
+        callback_buttons.append(
+            {
+                "type": "callback",
+                "text": button_text,
+                "payload": payload_value,
+            }
         )
+
+    if callback_buttons:
+        buttons_per_row = min(
+            _MAX_INLINE_BUTTONS_PER_ROW,
+            max(1, math.ceil(len(callback_buttons) / _MAX_INLINE_KEYBOARD_ROWS)),
+    )
+        callback_rows = [
+            callback_buttons[i: i + buttons_per_row]
+            for i in range(0, len(callback_buttons), buttons_per_row)
+        ]
+    else:
+        callback_rows = []
     if not callback_rows:
         logger.warning("[MAX API] inline keyboard has no valid buttons, sending plain text")
         await send_text(chat_id=chat_id, text=text)
