@@ -288,6 +288,9 @@ async def send_files_prompt(flow: DamageFlow, chat_id: int, text: str) -> None:
 async def warmup_damage_refs() -> None:
     await _ensure_refs_loaded()
 
+async def refresh_damage_refs() -> None:
+    global _ref_data
+    _ref_data = await load_damage_reference_data()
 
 def reset_damage_progress(st: DamageState, user_id: int) -> None:
     _clear(st, user_id)

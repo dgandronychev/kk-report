@@ -12,7 +12,7 @@ import threading
 from typing import Optional
 
 from app.utils.scheduler import start_schedulers
-from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN
+from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN, UPDATE_DATA_ALLOWED_USER_IDS
 from app.utils.http import run_http
 from app.utils.max_api import get_updates, send_text
 from app.utils.chat_memory import remember_chat_id
@@ -23,10 +23,10 @@ from app.handlers.registration import (
     reset_registration_progress,
 )
 from app.handlers import work_shift
-from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step, pop_pending_sborka_transfer, reset_damage_progress, warmup_damage_refs
-from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step, start_from_damage_transfer, reset_sborka_progress, warmup_sborka_refs
-from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step, reset_soberi_progress, warmup_soberi_refs
-from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step, reset_nomenclature_progress, warmup_nomenclature_refs
+from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step, pop_pending_sborka_transfer, reset_damage_progress, warmup_damage_refs, refresh_damage_refs
+from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step, start_from_damage_transfer, reset_sborka_progress, warmup_sborka_refs, refresh_sborka_refs
+from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step, reset_soberi_progress, warmup_soberi_refs, refresh_soberi_refs
+from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step, reset_nomenclature_progress, warmup_nomenclature_refs, refresh_nomenclature_refs
 from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step, reset_open_gate_progress
 from app.handlers.finance import (
     FinanceState,
@@ -40,6 +40,21 @@ from app.handlers.move import MoveState, cmd_move, try_handle_move_step, reset_m
 
 logger = logging.getLogger(__name__)
 
+async def _refresh_reference_caches(chat_id: int) -> None:
+    await send_text(chat_id, "Обновление списков началось")
+    try:
+        await asyncio.gather(
+            refresh_damage_refs(),
+            refresh_sborka_refs(),
+            refresh_soberi_refs(),
+            refresh_nomenclature_refs(),
+        )
+    except Exception:
+        logging.exception("failed to refresh reference caches")
+        await send_text(chat_id, "Не удалось обновить базу данных. Попробуйте чуть позже.")
+        return
+
+    await send_text(chat_id, "Обновление завершено")
 # ===== State (позже вынесешь в отдельный storage) =====
 _reg = RegistrationState(wait_phone_users=set())
 _shift = work_shift.WorkShiftState()
@@ -353,6 +368,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "расход": "/expense",
         "move": "/move",
         "перемещение": "/move",
+        "update_data": "/update_data",
+        "обновить данные": "/update_data",
     }
     is_command = False
     if t:
@@ -448,6 +465,12 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_nomenclature(_nomenclature, user_id, chat_id, username)
+        return
+    if t == "/update_data":
+        if UPDATE_DATA_ALLOWED_USER_IDS and user_id not in UPDATE_DATA_ALLOWED_USER_IDS:
+            await send_text(chat_id, "У вас нет прав для вызова данной команды")
+            return
+        await _refresh_reference_caches(chat_id)
         return
     if t == "/open_gate":
         await cmd_open_gate(_open_gate, user_id, chat_id, msg)

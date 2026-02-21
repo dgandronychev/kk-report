@@ -130,6 +130,9 @@ def _clear(st: SoberiState, user_id: int) -> None:
 async def warmup_soberi_refs() -> None:
     await _ensure_refs_loaded()
 
+async def refresh_soberi_refs() -> None:
+    global _ref_data
+    _ref_data = await load_sborka_reference_data()
 
 def reset_soberi_progress(st: SoberiState, user_id: int) -> None:
     _clear(st, user_id)

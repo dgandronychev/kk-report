@@ -54,3 +54,4 @@ def _parse_user_ids_csv(value: str) -> set[int]:
     return out
 
 NOMENCLATURE_ALLOWED_USER_IDS = _parse_user_ids_csv("199909595")
+UPDATE_DATA_ALLOWED_USER_IDS = _parse_user_ids_csv(os.getenv("UPDATE_DATA_ALLOWED_USER_IDS", "199909595"))

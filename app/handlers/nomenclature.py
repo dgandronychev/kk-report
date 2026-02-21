@@ -100,6 +100,9 @@ def _clear(st: NomenclatureState, user_id: int) -> None:
 async def warmup_nomenclature_refs() -> None:
     await _ensure_refs_loaded()
 
+async def refresh_nomenclature_refs() -> None:
+    global _ref_data
+    _ref_data = await load_nomenclature_reference_data()
 
 def reset_nomenclature_progress(st: NomenclatureState, user_id: int) -> None:
     _clear(st, user_id)
@@ -138,6 +141,9 @@ def _save(data: dict) -> None:
     ]
     write_in_answers_ras_nomen(row, sheet)
 
+async def _save_and_refresh(data: dict) -> None:
+    _save(data)
+    await refresh_nomenclature_refs()
 
 async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     flow = st.flows_by_user.get(user_id)
@@ -217,14 +223,14 @@ async def try_handle_nomenclature_step(st: NomenclatureState, user_id: int, chat
             flow.step = "al"
             await _ask(flow, chat_id, "Введите АЛ:", [], include_back=True)
             return True
-        _save(data)
+        await _save_and_refresh(data)
         await _send_flow_text(flow, chat_id, "Добавление новой номенклатуры выполнено")
         _clear(st, user_id)
         return True
 
     if step == "al":
         data["al"] = t
-        _save(data)
+        await _save_and_refresh(data)
         await _send_flow_text(flow, chat_id, "Добавление новой номенклатуры выполнено")
         _clear(st, user_id)
         return True

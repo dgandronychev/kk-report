@@ -303,6 +303,9 @@ def _clear(st: SborkaState, user_id: int) -> None:
 async def warmup_sborka_refs() -> None:
     await _ensure_refs_loaded()
 
+async def refresh_sborka_refs() -> None:
+    global _ref_data
+    _ref_data = await load_sborka_reference_data()
 
 def reset_sborka_progress(st: SborkaState, user_id: int) -> None:
     _clear(st, user_id)
