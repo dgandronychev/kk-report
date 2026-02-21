@@ -74,7 +74,7 @@ async def try_handle_open_gate_step(st: OpenGateState, user_id: int, chat_id: in
     tags, fios = find_logistics_rows()
     logist = ""
     if fios:
-        logist = " , ".join(f"{name} ({tag})" for name, tag in zip(fios, tags))
+        logist = " , ".join(f"{name}" for name, tag in zip(fios, tags))
 
     now_msk = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
     send_text_value = (
