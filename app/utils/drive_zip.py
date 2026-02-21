@@ -86,8 +86,12 @@ async def build_zip_from_max_attachments(files: list[dict]) -> str:
 
 
 def upload_zip_private(zip_path, zip_name, folder_id, creds_json_path):
-    from googleapiclient.http import MediaFileUpload
-    from googleapiclient.errors import HttpError
+    try:
+        from googleapiclient.http import MediaFileUpload
+        from googleapiclient.errors import HttpError
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("google-api-python-client is not installed") from exc
+
 
     drive = _drive_service(creds_json_path)
     meta = {"name": zip_name, "parents": [folder_id]}
