@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import logging
 import tempfile
 import zipfile
 from datetime import datetime
@@ -9,6 +11,10 @@ from typing import Any, Iterable
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
+def is_google_drive_upload_available() -> bool:
+    return importlib.util.find_spec("googleapiclient") is not None
 
 def safe_zip_name(grz: str) -> str:
     grz = (grz or "").strip().upper()
@@ -89,8 +95,9 @@ def upload_zip_private(zip_path, zip_name, folder_id, creds_json_path):
     try:
         from googleapiclient.http import MediaFileUpload
         from googleapiclient.errors import HttpError
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("google-api-python-client is not installed") from exc
+    except ModuleNotFoundError:
+        logger.warning("[drive_zip] google-api-python-client is not installed, zip upload skipped")
+        return ""
 
 
     drive = _drive_service(creds_json_path)

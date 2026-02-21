@@ -6,9 +6,11 @@ from typing import Optional
 
 import httpx
 import requests
+import logging
 
 from app.config import URL_GET_FIO, URL_GET_INFO_TASK, URL_REGISTRASHION
 
+logger = logging.getLogger(__name__)
 
 def normalize_phone(s: str) -> Optional[str]:
     digits = re.sub(r"[^0-9]", "", s)
@@ -124,22 +126,27 @@ def _fallback_fio(msg: dict, user_id: int) -> str:
 
 
 async def get_fio_async(max_chat_id: int, user_id: int, msg: Optional[dict] = None) -> str:
-    if not URL_GET_FIO:
-        return _fallback_fio(msg or {}, user_id)
-
     fallback = _fallback_fio(msg or {}, user_id)
-
+    logger.info("[get_fio_async] request started | user_id=%s chat_id=%s url=%s", user_id, max_chat_id, URL_GET_FIO)
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.get(URL_GET_FIO, params={"max_chat_id": str(max_chat_id)})
 
+        logger.info("[get_fio_async] response received | user_id=%s chat_id=%s status=%s", user_id, max_chat_id,
+                    response.status_code)
         response.raise_for_status()
         parsed = response.json()
 
         fio = _extract_fio_from_payload(parsed)
         if fio:
+            logger.info("[get_fio_async] fio resolved from backend | user_id=%s chat_id=%s fio=%s", user_id,
+                        max_chat_id, fio)
             return fio
+        logger.warning("[get_fio_async] backend returned no fio fields, fallback will be used | user_id=%s chat_id=%s",
+                       user_id, max_chat_id)
     except Exception:
+        logger.exception("[get_fio_async] request failed, fallback will be used | user_id=%s chat_id=%s", user_id,
+                         max_chat_id)
         return fallback
 
     return fallback
