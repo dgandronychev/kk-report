@@ -267,6 +267,30 @@ async def warmup_sborka_refs() -> None:
 def reset_sborka_progress(st: SborkaState, user_id: int) -> None:
     _clear(st, user_id)
 
+async def start_from_damage_transfer(st: SborkaState, user_id: int, chat_id: int, username: str, transfer: dict) -> None:
+    prefill = dict(transfer.get("prefill") or {})
+    prefill["username"] = username
+    prefill["type"] = "sborka"
+    prefill["type_sborka"] = prefill.get("type_sborka") or "sborka"
+
+    mode = str(transfer.get("mode") or "")
+    if mode == "replace_tire_confirm":
+        st.flows_by_user[user_id] = SborkaFlow(step="damage_replace_tire_confirm", data=prefill)
+        await _ask(st.flows_by_user[user_id], chat_id, "Есть покрышка на замену:", _KEY_ZAYAVKA)
+        return
+
+    if mode == "replace_disk_confirm":
+        st.flows_by_user[user_id] = SborkaFlow(step="damage_replace_disk_confirm", data=prefill)
+        await _ask(st.flows_by_user[user_id], chat_id, "Есть другой диск на замену:", _KEY_ZAYAVKA)
+        return
+
+    if mode == "pick_disk":
+        st.flows_by_user[user_id] = SborkaFlow(step="damage_pick_disk", data=prefill)
+        await _ask(st.flows_by_user[user_id], chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        return
+
+    st.flows_by_user[user_id] = SborkaFlow(step="damage_pick_side", data=prefill)
+    await _ask(st.flows_by_user[user_id], chat_id, "Уточните какое колесо:", _KEY_SIDE)
 
 async def _send_files_prompt(flow: SborkaFlow, chat_id: int, text: str) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
@@ -410,6 +434,9 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
     step = flow.step
     company = flow.data.get("company", "")
 
+    if step in {"damage_replace_tire_confirm", "damage_replace_disk_confirm", "damage_pick_disk", "damage_pick_side"}:
+        return True
+
     if step == "company":
         return True
 
@@ -523,6 +550,54 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
 
     step = flow.step
     t = text.strip()
+
+    if step == "damage_replace_tire_confirm":
+        if t not in _KEY_ZAYAVKA:
+            await _ask(flow, chat_id, "Есть покрышка на замену:", _KEY_ZAYAVKA)
+            return True
+        if t == "Нет":
+            prompt_msg_id = flow.data.get("prompt_msg_id")
+            if prompt_msg_id:
+                await delete_message(chat_id, prompt_msg_id)
+            _clear(st, user_id)
+            await send_text(chat_id, "Завершение формирования заявки")
+            return True
+        flow.step = "razmer"
+        await _ask(flow, chat_id, "Размер:", _filter_values(flow.data["company"], radius=flow.data.get("radius", ""), field=GHRezina.RAZMER))
+        return True
+
+    if step == "damage_replace_disk_confirm":
+        if t not in _KEY_ZAYAVKA:
+            await _ask(flow, chat_id, "Есть другой диск на замену:", _KEY_ZAYAVKA)
+            return True
+        if t == "Нет":
+            prompt_msg_id = flow.data.get("prompt_msg_id")
+            if prompt_msg_id:
+                await delete_message(chat_id, prompt_msg_id)
+            _clear(st, user_id)
+            await send_text(chat_id, "Завершение формирования заявки")
+            return True
+        flow.step = "damage_pick_disk"
+        await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
+        return True
+
+    if step == "damage_pick_disk":
+        if t not in _KEY_TYPE_DISK:
+            await _ask(flow, chat_id, "Выберите тип диска:", _KEY_TYPE_DISK)
+            return True
+        flow.data["type_disk"] = t
+        flow.step = "damage_pick_side"
+        await _ask(flow, chat_id, "Уточните какое колесо:", _KEY_SIDE)
+        return True
+
+    if step == "damage_pick_side":
+        if t not in _KEY_SIDE:
+            await _ask(flow, chat_id, "Уточните какое колесо:", _KEY_SIDE)
+            return True
+        flow.data["type_kolesa"] = t
+        flow.step = "zayavka"
+        await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
+        return True
 
     if step == "company":
         if t not in _KEY_COMPANY:

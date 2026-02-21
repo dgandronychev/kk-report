@@ -39,7 +39,7 @@ class DamageFlow:
 @dataclass
 class DamageState:
     flows_by_user: Dict[int, DamageFlow] = field(default_factory=dict)
-
+    pending_transfers: Dict[int, dict] = field(default_factory=dict)
 
 _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
 _KEY_TYPE = ["В сборе", "Только резина"]
@@ -281,6 +281,49 @@ async def warmup_damage_refs() -> None:
 def reset_damage_progress(st: DamageState, user_id: int) -> None:
     _clear(st, user_id)
 
+def pop_pending_sborka_transfer(st: DamageState, user_id: int) -> dict | None:
+    return st.pending_transfers.pop(user_id, None)
+
+
+def _build_sborka_transfer(data: dict) -> dict | None:
+    common = {
+        "company": data.get("company", ""),
+        "radius": data.get("radius", ""),
+        "razmer": data.get("razmer", ""),
+        "marka_rez": data.get("marka_rez", ""),
+        "model_rez": data.get("model_rez", ""),
+        "sezon": data.get("sezon", ""),
+        "marka_ts": data.get("marka_ts", ""),
+        "type_disk": data.get("type_disk", ""),
+        "type_sborka": "sborka",
+    }
+
+    if data.get("sost_disk") == "Ок" and data.get("sost_rez") == "Утиль":
+        return {
+            "mode": "replace_tire_confirm",
+            "prefill": common,
+        }
+
+    if data.get("sost_disk") == "Ок" and data.get("sost_rez") == "Ремонт":
+        return {
+            "mode": "pick_side",
+            "prefill": common,
+        }
+
+    if data.get("vid_kolesa") == "Только резина":
+        return {
+            "mode": "pick_disk",
+            "prefill": common,
+        }
+
+    if data.get("sost_disk") in {"Ремонт", "Утиль"}:
+        return {
+            "mode": "replace_disk_confirm",
+            "prefill": common,
+        }
+
+    return None
+
 async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> bool:
     flow = st.flows_by_user[user_id]
     if not flow.files:
@@ -344,6 +387,9 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         logger.exception("failed to write damage report to google sheets")
 
     await _send_flow_text(flow, chat_id, "Ваша заявка на оформление повреждения сформирована")
+    transfer = _build_sborka_transfer(data)
+    if transfer:
+        st.pending_transfers[user_id] = transfer
     _clear(st, user_id)
     return True
 
