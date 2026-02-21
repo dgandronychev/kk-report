@@ -200,7 +200,7 @@ def _company_chat(company: str) -> int:
     return int(SBORKA_CHAT_ID_BELKA)
 
 
-def _render_report(data: dict, fio: str, username: str) -> str:
+def _render_report(data: dict, fio: str) -> str:
     report = ""
     if data.get("type") == "check":
         if data.get("type_kolesa") == "Ось":
@@ -211,9 +211,8 @@ def _render_report(data: dict, fio: str, username: str) -> str:
             report += "Проверка готового колеса\n\n"
 
     report += f"⌚️ {(datetime.now() + timedelta(hours=3)).strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-    report += f"👷 {username}\n"
     if fio:
-        report += f"{fio}\n"
+        report += f"👷 {fio}\n"
     report += "\n"
     report += f"🚗 {data['marka_ts']}\n\n"
     report += f"🛞 {data['marka_rez']} {data['model_rez']}\n\n"
@@ -307,7 +306,7 @@ async def _send_files_prompt(flow: SborkaFlow, chat_id: int, text: str) -> None:
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
-def _write_sborka_rows(data: dict, message_ref: str, username: str) -> None:
+def _write_sborka_rows(data: dict, fio: str) -> None:
     base = [
         (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
         data["company"],
@@ -321,8 +320,8 @@ def _write_sborka_rows(data: dict, message_ref: str, username: str) -> None:
         data["type_kolesa"],
         data["zayavka"],
         data.get("nomer_sborka", ""),
-        message_ref,
-        username,
+        "",
+        fio,
     ]
 
     pos = data["type_kolesa"]
@@ -343,7 +342,7 @@ def _write_sborka_rows(data: dict, message_ref: str, username: str) -> None:
             write_in_answers_ras(row, "Выгрузка сборка")
             write_in_answers_ras(row, "Онлайн остатки Хаба")
 
-def _write_check_rows(data: dict, username: str) -> None:
+def _write_check_rows(data: dict, fio: str) -> None:
     count = 1
     if data.get("type_check") == "Ось":
         count = 2
@@ -369,7 +368,7 @@ def _write_check_rows(data: dict, username: str) -> None:
         "",
         "",
         "",
-        username,
+        fio,
     ]
     for _ in range(count):
         write_in_answers_ras(row, "Выгрузка ремонты/утиль")
@@ -382,8 +381,7 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
 
     data = flow.data
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    username = f"@{data.get('username') or user_id}"
-    report = _render_report(data, fio, username)
+    report = _render_report(data, fio)
 
     response = await send_message(chat_id=_company_chat(data["company"]), text=report, attachments=flow.files)
     msg_ref = ""
@@ -392,9 +390,9 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
 
     try:
         if data.get("type") == "check":
-            _write_check_rows(data, username)
+            _write_check_rows(data, fio)
         else:
-            _write_sborka_rows(data, msg_ref, username)
+            _write_sborka_rows(data, fio)
     except Exception:
         logger.exception("failed to write sborka/check rows")
 
@@ -417,7 +415,7 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
                 data["marka_ts"],
                 data["type_disk"],
                 data["type_kolesa"],
-                msg_ref,
+                "",
                 data["nomer_sborka"],
             )
         except Exception:

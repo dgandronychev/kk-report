@@ -404,7 +404,7 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         data["sost_rez"],
         data.get("sost_rez_prich", ""),
         data.get("por_nomer_rezina", ""),
-        msg_ref,
+        "",
         fio,
     ]
     try:

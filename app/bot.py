@@ -376,6 +376,11 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await work_shift.try_handle_work_shift_step(_shift, user_id, chat_id, t, msg):
         return
     if await try_handle_damage_step(_damage, user_id, chat_id, t, msg):
+        transfer = pop_pending_sborka_transfer(_damage, user_id)
+        if transfer is not None:
+            sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+            username = str(sender.get("username") or sender.get("first_name") or user_id)
+            await start_from_damage_transfer(_sborka, user_id, chat_id, username, transfer)
         return
     if await try_handle_sborka_step(_sborka, user_id, chat_id, t, msg):
         return
