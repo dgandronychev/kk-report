@@ -101,16 +101,54 @@ def write_in_answers_ras_shift(
     page: str = "Лист1",
     max_attempts: int = 3,
     base_delay: float = 1.0,
-) -> None:
+) -> Optional[str]:
+    duration: Optional[str] = None
+
+    dt_end: Optional[datetime] = None
+    if tlist:
+        dt_end = _parse_dt(tlist[0])
+
+    fio = str(tlist[1]).strip() if len(tlist) > 1 else ""
+    action = str(tlist[2]).strip() if len(tlist) > 2 else ""
     last_error: Optional[Exception] = None
     for attempt in range(1, max_attempts + 1):
         try:
             gc: Client = gspread.service_account("app/creds.json")
             sh = gc.open_by_url(GOOGLE_SHEETS_SHIFT)
             ws = sh.worksheet(page)
-            _log_sheet_write("append_row", page, tlist)
-            ws.append_row(tlist, value_input_option="RAW")
-            return
+
+            if action == "Окончание смены" and dt_end and fio:
+                all_rows = ws.get_all_values()
+                for row in reversed(all_rows):
+                    if len(row) < 3:
+                        continue
+                    row_fio = str(row[1]).strip()  # 2-й столбец: ФИО
+                    row_action = str(row[2]).strip()
+                    if row_fio != fio or row_action != "Начало смены":
+                        continue
+
+                    start_dt = _parse_dt(str(row[0]).lstrip("'"))
+                    if not start_dt:
+                        continue
+
+                    delta = (dt_end - start_dt) if dt_end >= start_dt else (dt_end + timedelta(days=1) - start_dt)
+                    if delta < timedelta(hours=24):
+                        total_seconds = int(delta.total_seconds())
+                        hours, rem = divmod(total_seconds, 3600)
+                        minutes, seconds = divmod(rem, 60)
+                        duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    else:
+                        duration = "Нет данных"
+                    break
+
+            row_to_append = list(tlist)
+            if len(row_to_append) < 6:
+                row_to_append.extend([""] * (6 - len(row_to_append)))
+            row_to_append[5] = duration or "Нет данных"
+
+            _log_sheet_write("append_row", page, row_to_append)
+            ws.append_row(row_to_append, value_input_option="RAW")
+            return duration
         except APIError as e:
             last_error = e
             if attempt == max_attempts:
@@ -140,6 +178,7 @@ def write_in_answers_ras_shift(
 
     if last_error:
         raise last_error
+    return duration
 
 def _open_sklad_sheet() -> Spreadsheet:
     gc: Client = gspread.service_account("app/creds.json")

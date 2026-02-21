@@ -8,7 +8,7 @@ from typing import Dict
 from app.config import SBORKA_CHAT_ID_CITY
 from app.utils.gsheets import find_logistics_rows, write_open_gate_row
 from app.utils.helper import get_fio_async
-from app.utils.max_api import send_message, send_text
+from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +27,14 @@ async def cmd_open_gate(st: OpenGateState, user_id: int, chat_id: int, msg: dict
     st.company_by_user[user_id] = "СитиДрайв"
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-
-    await send_text(
-        chat_id,
-        f"ФИО: {fio}\nПодтвердите открытие ворот склада\n\nОтветьте: Подтвердить открытие или Выход",
+    await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=(
+            f"ФИО: {fio}\n"
+            "Подтвердите открытие ворот склада"
+        ),
+        button_texts=["Подтвердить открытие", "Выход"],
+        button_payloads=["open_gate_confirm", "open_gate_exit"],
     )
 
 
@@ -38,18 +42,28 @@ async def try_handle_open_gate_step(st: OpenGateState, user_id: int, chat_id: in
     if user_id not in st.waiting_confirm_users:
         return False
 
-    normalized = text.strip().lower()
-    if not normalized:
+    callback = msg.get("callback") if isinstance(msg.get("callback"), dict) else {}
+    callback_payload = callback.get("payload") if isinstance(callback.get("payload"), dict) else {}
+
+    control_values = [text]
+    for key in ("payload", "data", "value", "command", "action", "text"):
+        value = callback_payload.get(key)
+        if isinstance(value, str):
+            control_values.append(value)
+
+    normalized_candidates = {str(value).strip().lower() for value in control_values if str(value).strip()}
+
+    if not normalized_candidates:
         await send_text(chat_id, "Выберите действие: Подтвердить открытие / Выход")
         return True
 
-    if normalized == "выход":
+    if {"выход", "open_gate_exit"} & normalized_candidates:
         st.waiting_confirm_users.discard(user_id)
         st.company_by_user.pop(user_id, None)
         await send_text(chat_id, "Операция отменена")
         return True
 
-    if normalized != "подтвердить открытие":
+    if not ({"подтвердить открытие", "open_gate_confirm"} & normalized_candidates):
         await send_text(chat_id, "Выберите действие: Подтвердить открытие / Выход")
         return True
 

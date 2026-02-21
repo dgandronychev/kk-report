@@ -105,9 +105,9 @@ def reset_nomenclature_progress(st: NomenclatureState, user_id: int) -> None:
     _clear(st, user_id)
 
 async def cmd_nomenclature(st: NomenclatureState, user_id: int, chat_id: int, username: str) -> None:
-    if NOMENCLATURE_ALLOWED_USER_IDS and user_id not in NOMENCLATURE_ALLOWED_USER_IDS:
-        await send_text(chat_id, "У вас нет прав для вызова данной команды")
-        return
+    # if NOMENCLATURE_ALLOWED_USER_IDS and user_id not in NOMENCLATURE_ALLOWED_USER_IDS:
+    #     await send_text(chat_id, "У вас нет прав для вызова данной команды")
+    #     return
 
     await _ensure_refs_loaded()
     st.flows_by_user[user_id] = NomenclatureFlow(step="company", data={"username": username})

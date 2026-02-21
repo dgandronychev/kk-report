@@ -159,16 +159,18 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     report = _caption(action, fio)
-    report = f"{report}"
-
-    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
-
     timestamp = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+    duration: Optional[str] = None
 
     try:
-        write_in_answers_ras_shift([timestamp, fio, action, "", ""], "Лист1")
+        duration = write_in_answers_ras_shift([timestamp, fio, action, "", ""], "Лист1")
     except Exception:
         logger.exception("Failed to write work shift report to Google Sheets")
+
+    if duration and action == "Окончание смены":
+        report = f"{report}\n⏱ Длительность смены: {duration}"
+
+    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
 
     await _send_flow_text(st, user_id, chat_id, "Ваша заявка сформирована")
 
