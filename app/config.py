@@ -31,6 +31,7 @@ GSPREAD_URL_MAIN = "https://docs.google.com/spreadsheets/d/1Rk_9eyjx0u5dUGnz84-6
 GSPREAD_URL_ANSWER = "https://docs.google.com/spreadsheets/d/1p044-xtk5TxFOsPZ9l_kbthc53toqdh3kRXrGbU5Iao/edit?gid=0#gid=0"
 GSPREAD_URL_SKLAD = "https://docs.google.com/spreadsheets/d/1X-2KWPrGeDPyRj9WrzyrdGA2knxjQf9k1XeAWrGQWvg/edit?gid=0#gid=0"
 GSPREAD_URL_GATES = "https://docs.google.com/spreadsheets/d/1BH7HDYBS6E-nSoq3ZBQljhA74aAEe8QIOviwOPpAyX4/edit?gid=0#gid=0"
+GOOGLE_SHEETS_SHIFT = "https://docs.google.com/spreadsheets/d/1lXmm7IzvT6oBhGf62aOU1rlcmGRbyQxfBTTAjUtF7PQ/edit?gid=0#gid=0"
 
 GOOGLE_DRIVE_CREDS_JSON = os.environ.get("GOOGLE_DRIVE_CREDS_JSON", "app/creds.json")
 GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID", "1EzE_RQBt8-tkbPstIll_KfdOUAwY3564")

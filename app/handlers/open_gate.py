@@ -72,22 +72,13 @@ async def try_handle_open_gate_step(st: OpenGateState, user_id: int, chat_id: in
     if logist:
         send_text_value += f"\n{logist}"
 
-    sent = await send_message(chat_id=int(SBORKA_CHAT_ID_CITY), text=send_text_value)
-
-    message_id = ""
-    if isinstance(sent, dict):
-        message_id = str(sent.get("message_id") or sent.get("id") or "")
-
-    message_link = ""
-    if message_id:
-        message_link = f"max://chat/{SBORKA_CHAT_ID_CITY}/message/{message_id}"
+    await send_message(chat_id=int(SBORKA_CHAT_ID_CITY), text=send_text_value)
 
     try:
         write_open_gate_row(
             fio=fio,
             car_plate=plate,
             company=company,
-            message_link=message_link,
         )
     except Exception:
         logger.exception("Ошибка отправки в write_open_gate_row")

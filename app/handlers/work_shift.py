@@ -55,13 +55,6 @@ def _clear_flow(st: WorkShiftState, user_id: int, chat_id: int) -> None:
 def reset_work_shift_progress(st: WorkShiftState, user_id: int, chat_id: int) -> None:
     _clear_flow(st, user_id, chat_id)
 
-def _extract_user_label(msg: dict, user_id: int) -> str:
-    sender = msg.get("sender") or {}
-    username = sender.get("username") or sender.get("first_name") or str(user_id)
-    if isinstance(username, str) and username.startswith("@"):
-        return username
-    return f"@{username}"
-
 def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
     attachments = msg.get("attachments")
     if include_nested and not isinstance(attachments, list):
@@ -95,12 +88,11 @@ def _attachment_key(item: dict) -> str:
         payload_str = str(payload)
     return f"{item.get('type')}::{payload_str}"
 
-def _caption(action: str, fio: str, username: str) -> str:
+def _caption(action: str, fio: str) -> str:
     ts = datetime.now() + timedelta(hours=3)
     return (
         f"⌚️ {ts.strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-        f"👷 {username}\n\n"
-        f"{fio}\n\n"
+        f"👷 {fio}\n\n"
         f"{action}\n"
     )
 
@@ -166,19 +158,15 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
         return True
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    username = _extract_user_label(msg, user_id)
-    report = _caption(action, fio, username)
-    report = f"{report}\n📎 Вложений: {len(files)}"
+    report = _caption(action, fio)
+    report = f"{report}"
 
-    response = await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
+    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
 
     timestamp = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
-    message_ref = ""
-    if isinstance(response, dict):
-        message_ref = str(response.get("message_id") or response.get("id") or "")
 
     try:
-        write_in_answers_ras_shift([timestamp, fio, action, username, message_ref], "Лист1")
+        write_in_answers_ras_shift([timestamp, fio, action, "", ""], "Лист1")
     except Exception:
         logger.exception("Failed to write work shift report to Google Sheets")
 

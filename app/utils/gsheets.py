@@ -4,7 +4,7 @@ import re
 from gspread import Client, Spreadsheet
 from typing import List, Tuple, Optional, Any
 from datetime import datetime, timedelta, time
-from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD, GSPREAD_URL_GATES
+from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD, GSPREAD_URL_GATES, GOOGLE_SHEETS_SHIFT
 from gspread.exceptions import APIError
 
 EXCEL_EPOCH = datetime(1899, 12, 30)
@@ -106,7 +106,7 @@ def write_in_answers_ras_shift(
     for attempt in range(1, max_attempts + 1):
         try:
             gc: Client = gspread.service_account("app/creds.json")
-            sh = gc.open_by_url(URL_GOOGLE_SHEETS_CHART)
+            sh = gc.open_by_url(GOOGLE_SHEETS_SHIFT)
             ws = sh.worksheet(page)
             _log_sheet_write("append_row", page, tlist)
             ws.append_row(tlist, value_input_option="RAW")
@@ -519,7 +519,7 @@ def write_in_answers_ras_nomen(tlist: list, name_sheet: str, max_attempts: int =
     if last_error:
         raise last_error
 
-def write_open_gate_row(fio: str, car_plate: str, company: str, message_link: str) -> None:
+def write_open_gate_row(fio: str, car_plate: str, company: str) -> None:
     ws = gspread.service_account("app/creds.json").open_by_url(GSPREAD_URL_GATES).worksheet("Выгрузка Техники")
     now_msk = datetime.now() + timedelta(hours=3)
     payload = [
@@ -528,7 +528,7 @@ def write_open_gate_row(fio: str, car_plate: str, company: str, message_link: st
         fio,
         car_plate,
         company,
-        message_link,
+        "",
     ]
     _log_sheet_write("append_row", "Выгрузка Техники", payload)
     ws.append_row(
