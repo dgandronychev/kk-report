@@ -72,7 +72,7 @@ async def send_text_with_reply_buttons(
                 {
                     "type": "callback",
                     "text": button_text,
-                    "payload": {"command": str(payload)},
+                    "payload": {"command": payload_value},
                 }
             ]
         )
