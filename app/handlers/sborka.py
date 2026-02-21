@@ -194,6 +194,8 @@ def _list_marka_ts(company: str) -> list[str]:
             out.append(value)
     return sorted(set(out))
 
+def _type_kolesa_options(flow: SborkaFlow) -> list[str]:
+    return _KEY_TYPE_SBORKA if flow.data.get("type_sborka") == "sborka_ko" else _KEY_SIDE
 
 def _company_chat(company: str) -> int:
     if company == "СитиДрайв":
@@ -504,7 +506,7 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
             await _ask(flow, chat_id, "Сезон:", _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""), marka=flow.data.get("marka_rez", ""), model=flow.data.get("model_rez", ""), field=GHRezina.SEZON))
             return True
         flow.step = "type_kolesa"
-        await _ask(flow, chat_id, "Вид сборки:", _KEY_TYPE_SBORKA + _KEY_SIDE)
+        await _ask(flow, chat_id, "Вид сборки:", _type_kolesa_options(flow))
         return True
 
     if step == "nomer":
@@ -687,7 +689,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Укажите, что проверяем:", _KEY_TYPE_CHECK)
             return True
         flow.step = "type_kolesa"
-        await _ask(flow, chat_id, "Вид сборки:", _KEY_TYPE_SBORKA)
+        await _ask(flow, chat_id, "Вид сборки:", _type_kolesa_options(flow))
         return True
 
     if step == "type_check":
@@ -703,7 +705,7 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
         return True
 
     if step == "type_kolesa":
-        options = _KEY_TYPE_SBORKA + _KEY_SIDE
+        options = _type_kolesa_options(flow)
         if t not in options:
             await _ask(flow, chat_id, "Выберите вид сборки:", options)
             return True
