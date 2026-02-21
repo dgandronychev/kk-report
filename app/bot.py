@@ -36,6 +36,7 @@ from app.handlers.finance import (
     try_handle_finance_step,
     reset_finance_progress,
 )
+from app.handlers.move import MoveState, cmd_move, try_handle_move_step, reset_move_progress
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ _soberi = SoberiState()
 _nomenclature = NomenclatureState()
 _open_gate = OpenGateState()
 _finance = FinanceState()
+_move = MoveState()
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -316,6 +318,7 @@ def _reset_user_progress(user_id: int, chat_id: int) -> None:
     reset_nomenclature_progress(_nomenclature, user_id)
     reset_open_gate_progress(_open_gate, user_id)
     reset_finance_progress(_finance, user_id)
+    reset_move_progress(_move, user_id)
     work_shift.reset_work_shift_progress(_shift, user_id, chat_id)
 
 # ===== Routing =====
@@ -348,6 +351,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "парковка": "/parking",
         "заправка": "/zapravka",
         "расход": "/expense",
+        "move": "/move",
+        "перемещение": "/move",
     }
     is_command = False
     if t:
@@ -382,7 +387,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
     if await try_handle_finance_step(_finance, user_id, chat_id, t, msg):
         return
-
+    if await try_handle_move_step(_move, user_id, chat_id, t, msg):
+        return
 
     # 2) Команды
     if not t:
@@ -452,7 +458,11 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_expense(_finance, user_id, chat_id, username, msg)
         return
-
+    if t == "/move":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_move(_move, user_id, chat_id, username, msg)
+        return
 
     # 3) Default
     await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /soberi_belka, /nomenclature, /open_gate")
