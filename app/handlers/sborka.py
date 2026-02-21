@@ -409,7 +409,7 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
         try:
             update_record_sborka(
                 data["company"],
-                username,
+                fio,
                 data["radius"],
                 data["razmer"],
                 data["marka_rez"],
@@ -717,6 +717,13 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
             return True
         flow.data["zayavka"] = t
+
+        if t == "Нет":
+            flow.data["nomer_sborka"] = ""
+            flow.step = "files"
+            await _send_files_prompt(flow, chat_id, "Прикрепите фото/видео/файл и нажмите «Готово»")
+            return True
+
         flow.step = "nomer"
         candidates = nomer_sborka(
             flow.data["company"], flow.data["radius"], flow.data["razmer"], flow.data["marka_rez"],
