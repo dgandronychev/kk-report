@@ -432,12 +432,12 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if t == "/soberi":
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
         username = str(sender.get("username") or sender.get("first_name") or user_id)
-        await cmd_soberi(_soberi, user_id, chat_id, username)
+        await cmd_soberi(_soberi, user_id, chat_id, username, msg)
         return
     if t == "/soberi_belka":
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
         username = str(sender.get("username") or sender.get("first_name") or user_id)
-        await cmd_soberi_belka(_soberi, user_id, chat_id, username)
+        await cmd_soberi_belka(_soberi, user_id, chat_id, username, msg)
         return
     if t == "/check":
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}

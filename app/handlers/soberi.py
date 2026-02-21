@@ -6,6 +6,7 @@ from enum import IntEnum
 import logging
 import re
 from typing import Dict, List
+from app.utils.helper import get_fio_async
 
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 from app.utils.gsheets import (
@@ -43,6 +44,7 @@ _KEY_OBJECT = ["Комплект", "Ось", "Колесо"]
 _KEY_COMPANY = ["СитиДрайв", "Яндекс"]
 _KEY_TYPE_DISK = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
 _KEY_CHISLA = ["0", "1", "2", "3", "4", "5"]
+_MARKA_TS_PAGE_SIZE = 15
 
 _ref_data: dict | None = None
 
@@ -156,17 +158,55 @@ async def _ask(flow: SoberiFlow, chat_id: int, text: str, options: list[str], in
         flow.data["prompt_msg_id"] = msg_id
 
 
-async def cmd_soberi(st: SoberiState, user_id: int, chat_id: int, username: str) -> None:
+async def _ask_marka_ts(flow: SoberiFlow, chat_id: int, text: str = "Марка автомобиля:") -> None:
+    options = _list_marka_ts(flow.data["company"])
+    total = len(options)
+    if total == 0:
+        await _send_flow_text(flow, chat_id, "Список марок ТС пуст")
+        return
+
+    max_page = max(0, (total - 1) // _MARKA_TS_PAGE_SIZE)
+    page = int(flow.data.get("marka_ts_page", 0))
+    page = min(max(page, 0), max_page)
+    flow.data["marka_ts_page"] = page
+
+    start = page * _MARKA_TS_PAGE_SIZE
+    end = start + _MARKA_TS_PAGE_SIZE
+    page_options = options[start:end]
+    page_payloads = page_options[:]
+
+    if page > 0:
+        page_options.append("⬅️ Предыдущая")
+        page_payloads.append("soberi_page_prev")
+    if page < max_page:
+        page_options.append("➡️ Следующая")
+        page_payloads.append("soberi_page_next")
+
+    button_texts = page_options + ["Назад", "Выход"]
+    payloads = page_payloads + ["soberi_back", "soberi_exit"]
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(chat_id, f"{text}\nСтраница {page + 1}/{max_page + 1}", button_texts=button_texts, button_payloads=payloads)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
+async def cmd_soberi(st: SoberiState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     await _ensure_refs_loaded()
-    st.flows_by_user[user_id] = SoberiFlow(step="type_soberi", data={"username": f"@{username}"})
+    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
+    st.flows_by_user[user_id] = SoberiFlow(step="type_soberi", data={"fio": fio})
     await _ask(st.flows_by_user[user_id], chat_id, "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
 
 
-async def cmd_soberi_belka(st: SoberiState, user_id: int, chat_id: int, username: str) -> None:
+async def cmd_soberi_belka(st: SoberiState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     await _ensure_refs_loaded()
+    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     st.flows_by_user[user_id] = SoberiFlow(
         step="type_soberi",
-        data={"username": f"@{username}", "company": "Белка", "preset_company": True},
+        data={"fio": fio, "company": "Белка", "preset_company": True},
     )
     await _ask(st.flows_by_user[user_id], chat_id, "Укажите, что собираем:", _KEY_OBJECT, include_back=False)
 
@@ -193,7 +233,7 @@ def _next_rows(data: dict) -> list[list[str]]:
             position,
             "",
             f"sb{num}",
-            data.get("username", ""),
+            data.get("fio", ""),
         ]
 
     type_soberi = data.get("type_soberi")
@@ -259,7 +299,8 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
         data["type_soberi"] = t
         if data.get("preset_company"):
             flow.step = "marka_ts"
-            await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
+            data["marka_ts_page"] = 0
+            await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
             return True
         flow.step = "company"
         await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
@@ -278,17 +319,17 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
                 await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
         elif step == "type_disk":
             flow.step = "marka_ts"
-            await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
+            await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
         elif step == "radius":
             flow.step = "marka_ts" if data.get("type_soberi") == "Комплект" else "type_disk"
             if flow.step == "marka_ts":
-                await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
+                await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
             else:
                 await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
         elif step == "razmer":
             flow.step = "marka_ts" if data.get("type_soberi") == "Комплект" else "radius"
             if flow.step == "marka_ts":
-                await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(data["company"])[:40])
+                await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
             else:
                 await _ask(flow, chat_id, "Радиус:", _list_radius(data["company"]))
         elif step == "marka_rez":
@@ -312,19 +353,29 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Уточните количество левых колес:", _KEY_CHISLA)
         return True
 
+    if flow.step == "marka_ts" and controls & {"soberi_page_prev", "soberi_page_next"}:
+        page = int(data.get("marka_ts_page", 0))
+        if "soberi_page_prev" in controls:
+            data["marka_ts_page"] = page - 1
+        else:
+            data["marka_ts_page"] = page + 1
+        await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
+        return True
+
     if step == "company":
         if t not in _KEY_COMPANY:
             await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
         data["company"] = t
+        data["marka_ts_page"] = 0
         flow.step = "marka_ts"
-        await _ask(flow, chat_id, "Марка автомобиля:", _list_marka_ts(t)[:40])
+        await _ask_marka_ts(flow, chat_id, "Марка автомобиля:")
         return True
 
     if step == "marka_ts":
         options = _list_marka_ts(data["company"])
         if t not in options:
-            await _ask(flow, chat_id, "Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:", options[:40])
+            await _ask_marka_ts(flow, chat_id, "Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:")
             return True
         data["marka_ts"] = t
         if data.get("type_soberi") == "Комплект":

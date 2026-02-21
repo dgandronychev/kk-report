@@ -51,6 +51,7 @@ _KEY_TYPE_SBORKA = ["Комплект", "Ось"]
 _KEY_TYPE_CHECK = ["Левое колесо", "Правое колесо", "Ось", "Комплект"]
 _KEY_SIDE = ["Левое", "Правое"]
 _KEY_ZAYAVKA = ["Да", "Нет"]
+_MARKA_TS_PAGE_SIZE = 15
 
 _ref_data: dict | None = None
 
@@ -85,17 +86,26 @@ async def _send_flow_text(flow: SborkaFlow, chat_id: int, text: str) -> None:
         flow.data["prompt_msg_id"] = msg_id
 
 
-async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
+async def _ask(
+    flow: SborkaFlow,
+    chat_id: int,
+    text: str,
+    options: list[str],
+    include_back: bool = True,
+    option_payloads: list[str] | None = None,
+) -> None:
     buttons, payloads = _kb_control(include_back=include_back)
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
         await delete_message(chat_id, prev_msg_id)
 
+    option_values = option_payloads if option_payloads is not None else options
+
     response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text=text,
         button_texts=options + buttons,
-        button_payloads=options + payloads,
+        button_payloads=option_values + payloads,
     )
     msg_id = extract_message_id(response)
     if msg_id:
@@ -104,9 +114,35 @@ async def _ask(flow: SborkaFlow, chat_id: int, text: str, options: list[str], in
 async def _ask_company(flow: SborkaFlow, chat_id: int, text: str = "Компания:") -> None:
     await _ask(flow, chat_id, text, _KEY_COMPANY, include_back=False)
 
+async def _ask_marka_ts(flow: SborkaFlow, chat_id: int, text: str = "Марка авто:") -> None:
+    options = _list_marka_ts(flow.data["company"])
+    total = len(options)
+    if total == 0:
+        await _send_flow_text(flow, chat_id, "Список марок ТС пуст")
+        return
+
+    max_page = max(0, (total - 1) // _MARKA_TS_PAGE_SIZE)
+    page = int(flow.data.get("marka_ts_page", 0))
+    page = min(max(page, 0), max_page)
+    flow.data["marka_ts_page"] = page
+
+    start = page * _MARKA_TS_PAGE_SIZE
+    end = start + _MARKA_TS_PAGE_SIZE
+    page_options = options[start:end]
+    page_payloads = page_options[:]
+
+    if page > 0:
+        page_options.append("⬅️ Предыдущая")
+        page_payloads.append("sborka_page_prev")
+    if page < max_page:
+        page_options.append("➡️ Следующая")
+        page_payloads.append("sborka_page_next")
+
+    suffix = f"\nСтраница {page + 1}/{max_page + 1}" if max_page > 0 else ""
+    await _ask(flow, chat_id, f"{text}{suffix}", page_options, option_payloads=page_payloads)
+
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
-
 
 def _control_candidates(text: str, msg: dict) -> set[str]:
     vals: list[str] = [text]
@@ -492,12 +528,12 @@ async def _handle_back(flow: SborkaFlow, chat_id: int) -> bool:
 
     if step == "type_check":
         flow.step = "marka_ts"
-        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(company)[:40])
+        await _ask_marka_ts(flow, chat_id, "Марка авто:")
         return True
 
     if step == "type_kolesa":
         flow.step = "marka_ts"
-        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(company)[:40])
+        await _ask_marka_ts(flow, chat_id, "Марка авто:")
         return True
 
     if step == "zayavka":
@@ -550,6 +586,15 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
 
     if controls & {"назад", "sborka_back"}:
         return await _handle_back(flow, chat_id)
+
+    if flow.step == "marka_ts" and controls & {"sborka_page_prev", "sborka_page_next"}:
+        page = int(flow.data.get("marka_ts_page", 0))
+        if "sborka_page_prev" in controls:
+            flow.data["marka_ts_page"] = page - 1
+        else:
+            flow.data["marka_ts_page"] = page + 1
+        await _ask_marka_ts(flow, chat_id, "Марка авто:")
+        return True
 
     step = flow.step
     t = text.strip()
@@ -607,9 +652,10 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             await _ask_company(flow, chat_id, "Выберите компанию:")
             return True
         flow.data["company"] = t
+        flow.data["marka_ts_page"] = 0
         if flow.data.get("type") == "check":
             flow.step = "marka_ts"
-            await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
+            await _ask_marka_ts(flow, chat_id, "Марка авто:")
             return True
         flow.step = "type_disk"
         await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
@@ -674,14 +720,15 @@ async def try_handle_sborka_step(st: SborkaState, user_id: int, chat_id: int, te
             flow.step = "zayavka"
             await _ask(flow, chat_id, "Сбор под заявку:", _KEY_ZAYAVKA)
             return True
+        flow.data["marka_ts_page"] = 0
         flow.step = "marka_ts"
-        await _ask(flow, chat_id, "Марка авто:", _list_marka_ts(flow.data["company"])[:40])
+        await _ask_marka_ts(flow, chat_id, "Марка авто:")
         return True
 
     if step == "marka_ts":
         options = _list_marka_ts(flow.data["company"])
         if t not in options:
-            await _ask(flow, chat_id, "Выберите марку авто:", options[:40])
+            await _ask_marka_ts(flow, chat_id, "Выберите марку авто:")
             return True
         flow.data["marka_ts"] = t
         if flow.data.get("type") == "check":

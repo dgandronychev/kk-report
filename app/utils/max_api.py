@@ -83,7 +83,7 @@ async def send_text_with_reply_buttons(
         buttons_per_row = min(
             _MAX_INLINE_BUTTONS_PER_ROW,
             max(1, math.ceil(len(callback_buttons) / _MAX_INLINE_KEYBOARD_ROWS)),
-    )
+        )
         callback_rows = [
             callback_buttons[i: i + buttons_per_row]
             for i in range(0, len(callback_buttons), buttons_per_row)
