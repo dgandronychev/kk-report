@@ -11,6 +11,9 @@ EXCEL_EPOCH = datetime(1899, 12, 30)
 
 logger = logging.getLogger(__name__)
 
+def _log_sheet_write(action: str, sheet: str, payload: Any) -> None:
+    logger.info("[GSHEETS] %s | sheet=%s | payload=%s", action, sheet, payload)
+
 def _parse_dt(val: Any, fallback_date: Optional[Any] = None) -> Optional[datetime]:
     """Пытается распарсить datetime из ячейки.
     val — может быть строкой/числом/пустым; fallback_date — из колонки 'Дата' (если start без даты)."""
@@ -105,6 +108,7 @@ def write_in_answers_ras_shift(
             gc: Client = gspread.service_account("app/creds.json")
             sh = gc.open_by_url(URL_GOOGLE_SHEETS_CHART)
             ws = sh.worksheet(page)
+            _log_sheet_write("append_row", page, tlist)
             ws.append_row(tlist, value_input_option="RAW")
             return
         except APIError as e:
@@ -229,6 +233,7 @@ def get_number_util(company: str, column_index: int) -> str:
 def write_soberi_in_google_sheets_rows(rows: list[list[str]]) -> None:
     sh = _open_sklad_sheet()
     ws = sh.worksheet("Заявка на сборку")
+    _log_sheet_write("append_rows", "Заявка на сборку", rows)
     ws.append_rows(
         rows,
         value_input_option="USER_ENTERED",
@@ -239,6 +244,7 @@ def write_soberi_in_google_sheets_rows(rows: list[list[str]]) -> None:
 def write_soberi_in_google_sheets(tlist: list) -> None:
     sh = _open_sklad_sheet()
     ws = sh.worksheet("Заявка на сборку")
+    _log_sheet_write("append_row", "Заявка на сборку", tlist)
     ws.append_row(
         tlist,
         value_input_option="USER_ENTERED",
@@ -365,10 +371,12 @@ def update_data_sborka(marka_rez, model_rez, type_disk, type_kolesa, nomer_sbork
         if len(row) < 14:
             continue
         if str(row[13]) == str(nomer_sborka) and str(row[11]) == str(type_kolesa):
-            ws.batch_update([
+            updates = [
                 {"range": f"K{idx}:K{idx}", "values": [[str(type_disk)]]},
                 {"range": f"H{idx}:I{idx}", "values": [[str(marka_rez), str(model_rez)]]},
-            ])
+            ]
+            _log_sheet_write("batch_update", "Заявка на сборку", updates)
+            ws.batch_update(updates)
             return
 
 
@@ -427,6 +435,7 @@ def update_record_sborka(company, username, radius, razmer, marka_rez, model_rez
                 sides_updated[side] += 1
 
     if updates:
+        _log_sheet_write("batch_update", "Заявка на сборку", updates)
         ws.batch_update(updates)
 
 async def load_damage_reference_data() -> dict:
@@ -459,6 +468,7 @@ def write_in_answers_ras(tlist: list, name_sheet: str, max_attempts: int = 3, ba
             gc: Client = gspread.service_account("app/creds.json")
             sh = gc.open_by_url(GSPREAD_URL_ANSWER)
             ws = sh.worksheet(name_sheet)
+            _log_sheet_write("append_row", name_sheet, tlist)
             ws.append_row(
                 tlist,
                 value_input_option="USER_ENTERED",
@@ -490,6 +500,7 @@ def write_in_answers_ras_nomen(tlist: list, name_sheet: str, max_attempts: int =
             gc: Client = gspread.service_account("app/creds.json")
             sh = gc.open_by_url(GSPREAD_URL_MAIN)
             ws = sh.worksheet(name_sheet)
+            _log_sheet_write("append_row", name_sheet, tlist)
             ws.append_row(tlist, value_input_option="USER_ENTERED")
             return
         except APIError as e:
@@ -511,15 +522,17 @@ def write_in_answers_ras_nomen(tlist: list, name_sheet: str, max_attempts: int =
 def write_open_gate_row(fio: str, car_plate: str, company: str, message_link: str) -> None:
     ws = gspread.service_account("app/creds.json").open_by_url(GSPREAD_URL_GATES).worksheet("Выгрузка Техники")
     now_msk = datetime.now() + timedelta(hours=3)
+    payload = [
+        now_msk.strftime("%d.%m.%Y"),
+        now_msk.strftime("%H:%M:%S"),
+        fio,
+        car_plate,
+        company,
+        message_link,
+    ]
+    _log_sheet_write("append_row", "Выгрузка Техники", payload)
     ws.append_row(
-        [
-            now_msk.strftime("%d.%m.%Y"),
-            now_msk.strftime("%H:%M:%S"),
-            fio,
-            car_plate,
-            company,
-            message_link,
-        ],
+        payload,
         value_input_option="USER_ENTERED",
         table_range="A1",
         insert_data_option="INSERT_ROWS",

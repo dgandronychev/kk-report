@@ -57,11 +57,29 @@ async def send_text_with_reply_buttons(
 
     callback_rows = []
     for idx, button_text in enumerate(button_texts):
-        payload = button_payloads[idx] if button_payloads else button_text
+        text_value = str(button_text).strip()
+        payload_raw = button_payloads[idx] if button_payloads else button_text
+        payload_value = str(payload_raw).strip()
+        if not text_value or not payload_value:
+            logger.warning(
+                "[MAX API] skip empty inline button | text=%r | payload=%r",
+                button_text,
+                payload_raw,
+            )
+            continue
         callback_rows.append(
-            [{"type": "callback", "text": button_text, "payload": payload}]
+            [
+                {
+                    "type": "callback",
+                    "text": button_text,
+                    "payload": {"command": str(payload)},
+                }
+            ]
         )
-
+    if not callback_rows:
+        logger.warning("[MAX API] inline keyboard has no valid buttons, sending plain text")
+        await send_text(chat_id=chat_id, text=text)
+        return None
     try:
         return await send_message(
             chat_id=chat_id,
@@ -110,9 +128,10 @@ async def send_message(
 
     if not r.is_success:
         logger.error(
-            "[MAX API] send_text failed | status=%s | response=%s",
+            "[MAX API] send_message failed | status=%s | response=%s | payload=%s",
             r.status_code,
             r.text[:1000],
+            payload,
         )
 
     r.raise_for_status()

@@ -185,10 +185,13 @@ def _list_marka_ts(company: str) -> list[str]:
         idx = 3
     else:
         idx = 1
-    out = []
+    out: list[str] = []
     for row in car_rows:
-        if len(row) > idx:
-            out.append(str(row[idx]).strip())
+        if len(row) <= idx:
+            continue
+        value = str(row[idx]).strip()
+        if value:
+            out.append(value)
     return sorted(set(out))
 
 
