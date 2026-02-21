@@ -23,8 +23,8 @@ from app.handlers.registration import (
     reset_registration_progress,
 )
 from app.handlers import work_shift
-from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step, start_from_damage_transfer, reset_damage_progress, warmup_damage_refs
-from app.handlers.sborka import SborkaState, cmd_sborka, pop_pending_sborka_transfer, try_handle_sborka_step, reset_sborka_progress, warmup_sborka_refs
+from app.handlers.damage import DamageState, cmd_damage, try_handle_damage_step, pop_pending_sborka_transfer, reset_damage_progress, warmup_damage_refs
+from app.handlers.sborka import SborkaState, cmd_sborka, try_handle_sborka_step, start_from_damage_transfer, reset_sborka_progress, warmup_sborka_refs
 from app.handlers.soberi import SoberiState, cmd_soberi, cmd_soberi_belka, try_handle_soberi_step, reset_soberi_progress, warmup_soberi_refs
 from app.handlers.nomenclature import NomenclatureState, cmd_nomenclature, try_handle_nomenclature_step, reset_nomenclature_progress, warmup_nomenclature_refs
 from app.handlers.open_gate import OpenGateState, cmd_open_gate, try_handle_open_gate_step, reset_open_gate_progress
