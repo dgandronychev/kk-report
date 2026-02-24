@@ -119,19 +119,24 @@ async def send_report(
             media_items.append({"type": "document", "media": url})
 
     if media_items:
-        media_items[0]["caption"] = text
+        # Telegram limits caption length for media to 1024 chars.
+        # Long reports should still be delivered as plain text even when
+        # media upload fails because of caption/media restrictions.
+        caption_text = text if len(text) <= 1024 else text[:1021] + "..."
+        media_items[0]["caption"] = caption_text
         payload: dict[str, Any] = {"chat_id": chat_id, "media": media_items}
         if thread_id:
             payload["message_thread_id"] = thread_id
 
         data = await _telegram_call("sendMediaGroup", payload)
         if not isinstance(data, dict):
-            return None
+            logger.warning("sendMediaGroup failed, falling back to sendMessage")
+            return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
         result = data.get("result")
         if isinstance(result, list) and result and isinstance(result[0], dict):
             message_id = result[0].get("message_id")
             if message_id is not None:
                 return build_message_link(chat_id, message_id, thread_id=thread_id)
-        return None
+        return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
 
     return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
