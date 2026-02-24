@@ -6,9 +6,20 @@ from enum import IntEnum
 import logging
 from typing import Dict, List, Set
 
-from app.config import SBORKA_CHAT_ID_BELKA, SBORKA_CHAT_ID_CITY, SBORKA_CHAT_ID_YANDEX
+from app.config import (
+    SBORKA_CHAT_ID_BELKA,
+    SBORKA_CHAT_ID_CITY,
+    SBORKA_CHAT_ID_YANDEX,
+    TELEGRAM_CHAT_ID_SBORKA_BELKA,
+    TELEGRAM_CHAT_ID_SBORKA_CITY,
+    TELEGRAM_CHAT_ID_SBORKA_YANDEX,
+    TELEGRAM_THREAD_ID_SBORKA_BELKA,
+    TELEGRAM_THREAD_ID_SBORKA_CITY,
+    TELEGRAM_THREAD_ID_SBORKA_YANDEX,
+)
 from app.utils.helper import get_fio_async
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
+from app.utils.telegram_api import send_report as send_telegram_report
 from app.utils.gsheets import (
     load_sborka_reference_data,
     nomer_sborka,
@@ -240,6 +251,12 @@ def _company_chat(company: str) -> int:
         return int(SBORKA_CHAT_ID_YANDEX)
     return int(SBORKA_CHAT_ID_BELKA)
 
+def _telegram_target_for_sborka(company: str) -> tuple[int, int | None]:
+    if company == "СитиДрайв":
+        return TELEGRAM_CHAT_ID_SBORKA_CITY or int(SBORKA_CHAT_ID_CITY), (TELEGRAM_THREAD_ID_SBORKA_CITY or None)
+    if company == "Яндекс":
+        return TELEGRAM_CHAT_ID_SBORKA_YANDEX or int(SBORKA_CHAT_ID_YANDEX), (TELEGRAM_THREAD_ID_SBORKA_YANDEX or None)
+    return TELEGRAM_CHAT_ID_SBORKA_BELKA or int(SBORKA_CHAT_ID_BELKA), (TELEGRAM_THREAD_ID_SBORKA_BELKA or None)
 
 def _render_report(data: dict, fio: str) -> str:
     report = ""
@@ -427,10 +444,10 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     report = _render_report(data, fio)
 
-    response = await send_message(chat_id=_company_chat(data["company"]), text=report, attachments=flow.files)
-    msg_ref = ""
-    if isinstance(response, dict):
-        msg_ref = str(response.get("message_id") or response.get("id") or "")
+    out_chat = _company_chat(data["company"])
+    response = await send_message(chat_id=out_chat, text=report, attachments=flow.files)
+    tg_chat_id, tg_thread_id = _telegram_target_for_sborka(data["company"])
+    telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report, attachments=flow.files)
 
     try:
         if data.get("type") == "check":
@@ -459,7 +476,7 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
                 data["marka_ts"],
                 data["type_disk"],
                 data["type_kolesa"],
-                "",
+                telegram_link or "",
                 data["nomer_sborka"],
             )
         except Exception:

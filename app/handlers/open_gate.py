@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict
 
-from app.config import SBORKA_CHAT_ID_CITY
+from app.config import SBORKA_CHAT_ID_CITY, TELEGRAM_CHAT_ID_GATES, TELEGRAM_THREAD_ID_GATES_CITY, TELEGRAM_THREAD_ID_GATES_YANDEX
 from app.utils.gsheets import find_logistics_rows, write_open_gate_row
 from app.utils.helper import get_fio_async
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
@@ -21,6 +21,12 @@ class OpenGateState:
 def reset_open_gate_progress(st: OpenGateState, user_id: int) -> None:
     st.waiting_confirm_users.discard(user_id)
     st.company_by_user.pop(user_id, None)
+
+def _telegram_target_for_gate(company: str) -> tuple[int, int | None]:
+    chat_id = TELEGRAM_CHAT_ID_GATES or int(SBORKA_CHAT_ID_CITY)
+    if company == "Яндекс":
+        return chat_id, TELEGRAM_THREAD_ID_GATES_YANDEX or None
+    return chat_id, TELEGRAM_THREAD_ID_GATES_CITY or None
 
 async def cmd_open_gate(st: OpenGateState, user_id: int, chat_id: int, msg: dict) -> None:
     st.waiting_confirm_users.add(user_id)
@@ -86,7 +92,10 @@ async def try_handle_open_gate_step(st: OpenGateState, user_id: int, chat_id: in
     if logist:
         send_text_value += f"\n{logist}"
 
-    await send_message(chat_id=int(SBORKA_CHAT_ID_CITY), text=send_text_value)
+    target_chat = int(SBORKA_CHAT_ID_CITY)
+    await send_message(chat_id=target_chat, text=send_text_value)
+    tg_chat_id, tg_thread_id = _telegram_target_for_gate(company)
+    await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=send_text_value)
 
     try:
         write_open_gate_row(

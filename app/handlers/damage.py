@@ -6,11 +6,29 @@ from enum import IntEnum
 import logging
 from typing import Dict, List, Optional, Set
 
-from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
+from app.config import (
+    DAMAGE_CHAT_ID_BELKA,
+    DAMAGE_CHAT_ID_CITY,
+    DAMAGE_CHAT_ID_YANDEX,
+    SBORKA_CHAT_ID_BELKA,
+    SBORKA_CHAT_ID_CITY,
+    SBORKA_CHAT_ID_YANDEX,
+    TELEGRAM_CHAT_ID_DAMAGE_BELKA,
+    TELEGRAM_CHAT_ID_DAMAGE_CITY,
+    TELEGRAM_CHAT_ID_DAMAGE_YANDEX,
+    TELEGRAM_CHAT_ID_SBORKA_BELKA,
+    TELEGRAM_CHAT_ID_SBORKA_CITY,
+    TELEGRAM_CHAT_ID_SBORKA_YANDEX,
+    TELEGRAM_THREAD_ID_DAMAGE_BELKA,
+    TELEGRAM_THREAD_ID_SBORKA_BELKA,
+    TELEGRAM_THREAD_ID_SBORKA_CITY,
+    TELEGRAM_THREAD_ID_SBORKA_YANDEX,
+)
 from app.utils.gsheets import get_number_util, load_damage_reference_data, write_in_answers_ras
 from app.utils.drive_zip import safe_zip_name, build_zip_from_max_attachments, upload_zip_private
 from app.utils.helper import get_fio_async
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
+from app.utils.telegram_api import send_report as send_telegram_report
 from app.config import GOOGLE_DRIVE_CREDS_JSON, GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID, POR_NOMER_DIS, POR_NOMER_REZ
 import asyncio
 
@@ -217,6 +235,22 @@ def _company_chat_id(company: str) -> int:
         return int(DAMAGE_CHAT_ID_YANDEX)
     return int(DAMAGE_CHAT_ID_BELKA)
 
+def _telegram_target_for_damage(data: dict) -> tuple[int, int | None]:
+    company = str(data.get("company") or "")
+    is_check_ok = data.get("type") == "check" and data.get("sost_disk") == "Ок" and data.get("sost_rez") == "Ок"
+
+    if is_check_ok:
+        if company == "СитиДрайв":
+            return TELEGRAM_CHAT_ID_SBORKA_CITY or int(SBORKA_CHAT_ID_CITY), (TELEGRAM_THREAD_ID_SBORKA_CITY or None)
+        if company == "Яндекс":
+            return TELEGRAM_CHAT_ID_SBORKA_YANDEX or int(SBORKA_CHAT_ID_YANDEX), (TELEGRAM_THREAD_ID_SBORKA_YANDEX or None)
+        return TELEGRAM_CHAT_ID_SBORKA_BELKA or int(SBORKA_CHAT_ID_BELKA), (TELEGRAM_THREAD_ID_SBORKA_BELKA or None)
+
+    if company == "СитиДрайв":
+        return TELEGRAM_CHAT_ID_DAMAGE_CITY or int(DAMAGE_CHAT_ID_CITY), None
+    if company == "Яндекс":
+        return TELEGRAM_CHAT_ID_DAMAGE_YANDEX or int(DAMAGE_CHAT_ID_YANDEX), None
+    return TELEGRAM_CHAT_ID_DAMAGE_BELKA or int(DAMAGE_CHAT_ID_BELKA), (TELEGRAM_THREAD_ID_DAMAGE_BELKA or None)
 
 def _render_report(data: dict, fio: str) -> str:
     report = ""
@@ -383,7 +417,11 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
             except Exception:
                 logger.exception("[drive][belka_damage] zip upload failed")
 
-    response = await send_message(chat_id=_company_chat_id(data["company"]), text=report, attachments=flow.files)
+    out_chat = _company_chat_id(data["company"])
+    response = await send_message(chat_id=out_chat, text=report, attachments=flow.files)
+    tg_chat_id, tg_thread_id = _telegram_target_for_damage(data)
+    telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report,
+                                               attachments=flow.files)
     msg_ref = ""
     message_id = extract_message_id(response if isinstance(response, dict) else None)
     if message_id:
@@ -407,7 +445,7 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         data["sost_rez"],
         data.get("sost_rez_prich", ""),
         data.get("por_nomer_rezina", ""),
-        "",
+        telegram_link or msg_ref,
         fio,
     ]
     try:

@@ -6,8 +6,9 @@ import json
 import logging
 from pprint import pformat
 from typing import Dict, List, Optional, Set
-from app.config import WORK_SHIFT_CHAT_ID
+from app.config import TELEGRAM_CHAT_ID_WORK_SHIFT, TELEGRAM_THREAD_ID_WORK_SHIFT, WORK_SHIFT_CHAT_ID
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
+from app.utils.telegram_api import send_report as send_telegram_report
 from app.utils.gsheets import write_in_answers_ras_shift
 from app.utils.helper import get_fio_async
 
@@ -160,18 +161,24 @@ async def _finalize(st: WorkShiftState, user_id: int, chat_id: int, msg: dict, a
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     report = _caption(action, fio)
     timestamp = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
+    tg_chat_id = TELEGRAM_CHAT_ID_WORK_SHIFT or int(WORK_SHIFT_CHAT_ID)
+    tg_thread_id = TELEGRAM_THREAD_ID_WORK_SHIFT or None
+    telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report,
+                                               attachments=files)
+
     duration: Optional[str] = None
 
     try:
-        duration = write_in_answers_ras_shift([timestamp, fio, action, "", ""], "Лист1")
+        duration = write_in_answers_ras_shift([timestamp, fio, action, "", telegram_link or ""], "Лист1")
     except Exception:
         logger.exception("Failed to write work shift report to Google Sheets")
 
     if duration and action == "Окончание смены":
         report = f"{report}\n⏱ Длительность смены: {duration}"
 
-    await send_message(chat_id=WORK_SHIFT_CHAT_ID, text=report, attachments=files)
-
+    await send_text(int(WORK_SHIFT_CHAT_ID), f"⏱ Длительность смены: {duration}")
+    await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=f"⏱ Длительность смены: {duration}")
     await _send_flow_text(st, user_id, chat_id, "Ваша заявка сформирована")
 
     _clear_flow(st, user_id, chat_id)
