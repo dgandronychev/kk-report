@@ -36,7 +36,7 @@ _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
 _KEY_CITY = ["Москва", "Санкт-Петербург"]
 _KEY_PAYMENT = ["Бизнес-карта", "Наличные <> Перевод <> Личная карта"]
 _KEY_PAYMENT_EXTRA = ["Подача на возмещение(свои деньги) + 6%"]
-
+_FINANCE_STUB_USER_IDS = {199909595}
 
 async def _ask(flow: FinanceFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
     controls = ["Выход"] if not include_back else ["Назад", "Выход"]
@@ -121,6 +121,9 @@ def _company_chat_id(company: str) -> int:
 
 
 async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
+    if chat_id < 0:
+        await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
+        return
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     st.flows_by_user[user_id] = FinanceFlow(
         kind="parking",
@@ -131,8 +134,23 @@ async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: st
 
 
 async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, username: str, msg: dict, kind: str) -> None:
+    if chat_id < 0:
+        await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
+        return
+
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     tasks = await get_open_tasks_async(max_chat_id=chat_id)
+
+    if not tasks and user_id in _FINANCE_STUB_USER_IDS:
+        tasks = [
+            {
+                "task_type": "Перегон СШМ",
+                "carsharing__name": "Тестовая компания",
+                "car_plate": "Т000ТТ000",
+                "car_model": "TestCar",
+            }
+        ]
+
     if not tasks:
         await send_text(chat_id, "У вас нет активной задачи")
         return
@@ -254,6 +272,8 @@ def _render_report(flow: FinanceFlow) -> str:
         + f"#{data.get('grz_tech', '—')}\n"
         + f"{data.get('grz_task', '—')}"
     )
+    if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
+        report += "\n\n@Anastasiya_CleanCar, cогласуйте, пожалуйста"
     return report
 
 
@@ -271,6 +291,7 @@ def _write_sheet(flow: FinanceFlow) -> None:
             data.get("grz_task", ""),
             len(flow.files),
         ]
+        logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Городская парковка", row)
         write_in_answers_ras(row, "Городская парковка")
         return
 
@@ -285,6 +306,7 @@ def _write_sheet(flow: FinanceFlow) -> None:
             data.get("fio", ""),
             len(flow.files),
         ]
+        logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Заправка техничек", row)
         write_in_answers_ras(row, "Заправка техничек")
         return
 
@@ -310,6 +332,7 @@ def _write_sheet(flow: FinanceFlow) -> None:
         data.get("grz_tech", ""),
         data.get("grz_task", ""),
     ]
+    logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Лист1", row)
     write_in_answers_ras(row, "Лист1")
 
 
@@ -325,6 +348,9 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         return True
 
     if flow.step == "task":
+        if ctrl == "back":
+            await send_text(chat_id, "Для выбора задачи используйте кнопку из списка")
+            return True
         tasks = flow.data.get("tasks") or []
         chosen = None
         for task in tasks:
@@ -355,16 +381,31 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
             return True
         if flow.step == "company":
+            if ctrl == "back":
+                flow.step = "grz_tech"
+                await _send_plain(flow, chat_id, "ГРЗ технички:")
+                return True
+            if text.strip() not in _KEY_COMPANY:
+                await _ask(flow, chat_id, "Выберите компанию из списка:", _KEY_COMPANY, include_back=False)
+                return True
             flow.data["company"] = text.strip()
             flow.step = "grz_task"
             await _send_plain(flow, chat_id, "Введите ГРЗ задачи:")
             return True
         if flow.step == "grz_task":
+            if ctrl == "back":
+                flow.step = "company"
+                await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+                return True
             flow.data["grz_task"] = text.strip().upper()
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
             return True
         if flow.step == "files":
+            if ctrl == "back":
+                flow.step = "grz_task"
+                await _send_plain(flow, chat_id, "Введите ГРЗ задачи:")
+                return True
             if ctrl == "done":
                 if len(flow.files) < 1:
                     await send_text(chat_id, "Нужно добавить хотя бы 1 файл")
@@ -379,6 +420,15 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
 
     if flow.kind == "zapravka":
         if flow.step == "odometer":
+            if ctrl == "back":
+                tasks = flow.data.get("tasks") or []
+                if len(tasks) > 1:
+                    flow.step = "task"
+                    task_buttons = [f"{str(task.get('car_plate') or '—')} | {str(task.get('carsharing__name') or '—')}" for task in tasks]
+                    await _ask(flow, chat_id, "У вас несколько активных задач.\nВыберите задачу:", task_buttons, include_back=False)
+                else:
+                    await send_text(chat_id, "Это первый шаг сценария")
+                return True
             try:
                 flow.data["odometer"] = float(text.strip().replace(",", "."))
             except Exception:
@@ -388,6 +438,10 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             await _send_plain(flow, chat_id, "Укажите сумму заправки:")
             return True
         if flow.step == "summa":
+            if ctrl == "back":
+                flow.step = "odometer"
+                await _send_plain(flow, chat_id, "Укажите показания одометра:")
+                return True
             try:
                 flow.data["summa"] = float(text.strip().replace(",", "."))
             except Exception:
@@ -397,6 +451,10 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             await _send_files_prompt(flow, chat_id, "Добавьте скриншот ППР и фото приборной панели ДО и ПОСЛЕ заправки")
             return True
         if flow.step == "files":
+            if ctrl == "back":
+                flow.step = "summa"
+                await _send_plain(flow, chat_id, "Укажите сумму заправки:")
+                return True
             if ctrl == "done":
                 if len(flow.files) < 3:
                     await send_text(chat_id, "Нужно минимум 3 файла")
@@ -411,16 +469,33 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
 
     if flow.kind == "expense":
         if flow.step == "city":
+            if ctrl == "back":
+                tasks = flow.data.get("tasks") or []
+                if len(tasks) > 1:
+                    flow.step = "task"
+                    task_buttons = [f"{str(task.get('car_plate') or '—')} | {str(task.get('carsharing__name') or '—')}" for task in tasks]
+                    await _ask(flow, chat_id, "У вас несколько активных задач.\nВыберите задачу:", task_buttons, include_back=False)
+                else:
+                    await send_text(chat_id, "Это первый шаг сценария")
+                return True
             flow.data["city"] = text.strip()
             flow.step = "grz_task"
             await _send_plain(flow, chat_id, "Введите ГРЗ задачи:")
             return True
         if flow.step == "grz_task":
+            if ctrl == "back":
+                flow.step = "city"
+                await _ask(flow, chat_id, "Выберите город из списка или введите вручную:", _KEY_CITY, include_back=False)
+                return True
             flow.data["grz_task"] = text.strip().upper()
             flow.step = "summa"
             await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
         if flow.step == "summa":
+            if ctrl == "back":
+                flow.step = "grz_task"
+                await _send_plain(flow, chat_id, "Введите ГРЗ задачи:")
+                return True
             try:
                 flow.data["summa"] = float(text.strip().replace(",", "."))
             except Exception:
@@ -430,6 +505,10 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             await _ask(flow, chat_id, "Способ оплаты:", _KEY_PAYMENT)
             return True
         if flow.step == "payment":
+            if ctrl == "back":
+                flow.step = "summa"
+                await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+                return True
             if text.strip() not in _KEY_PAYMENT:
                 await _ask(flow, chat_id, "Выберите способ оплаты из списка:", _KEY_PAYMENT)
                 return True
@@ -443,16 +522,35 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             await _send_plain(flow, chat_id, "Укажите причину расхода")
             return True
         if flow.step == "payment_extra":
+            if ctrl == "back":
+                flow.step = "payment"
+                await _ask(flow, chat_id, "Способ оплаты:", _KEY_PAYMENT)
+                return True
+            if text.strip() not in _KEY_PAYMENT_EXTRA:
+                await _ask(flow, chat_id, "Выберите из следующих категорий:", _KEY_PAYMENT_EXTRA)
+                return True
             flow.data["payment_extra"] = text.strip()
             flow.step = "reason"
             await _send_plain(flow, chat_id, "Укажите причину расхода")
             return True
         if flow.step == "reason":
+            if ctrl == "back":
+                if flow.data.get("payment") == "Наличные <> Перевод <> Личная карта":
+                    flow.step = "payment_extra"
+                    await _ask(flow, chat_id, "Выберите из следующих категорий:", _KEY_PAYMENT_EXTRA)
+                else:
+                    flow.step = "payment"
+                    await _ask(flow, chat_id, "Способ оплаты:", _KEY_PAYMENT)
+                return True
             flow.data["reason"] = text.strip()
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Загрузите фото чека/счета (от 1 до 4 файлов)")
             return True
         if flow.step == "files":
+            if ctrl == "back":
+                flow.step = "reason"
+                await _send_plain(flow, chat_id, "Укажите причину расхода")
+                return True
             if ctrl == "done":
                 if len(flow.files) < 1:
                     await send_text(chat_id, "Нужно добавить хотя бы 1 файл")
@@ -467,7 +565,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
             return True
 
     if ctrl == "back":
-        await send_text(chat_id, "Шаг «Назад» для этого сценария пока не поддержан, используйте «Выход» и начните заново")
+        await send_text(chat_id, "Это первый шаг сценария")
         return True
 
     return True
