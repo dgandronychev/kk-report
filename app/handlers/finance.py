@@ -425,22 +425,24 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "company"
                 await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
                 return True
-                grz_task = text.strip().upper()
-                matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], grz_task)
-                flow.data["grz_task"] = grz_task
-                if matches:
-                    flow.step = "grz_task_confirm"
-                    await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
-                    return True
-                flow.step = "files"
-                await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
-                await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
+            grz_task = text.strip().upper()
+            matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], grz_task)
+            flow.data["grz_task"] = grz_task
+            if matches:
+                flow.step = "grz_task_confirm"
+                await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                 return True
-            if flow.step == "grz_task_confirm":
-                if ctrl == "back":
-                    flow.step = "grz_task"
-                    await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
-                    return True
+
+            flow.step = "files"
+            await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
+            await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
+            return True
+
+        if flow.step == "grz_task_confirm":
+            if ctrl == "back":
+                flow.step = "grz_task"
+                await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                return True
             flow.data["grz_task"] = text.strip().upper()
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
