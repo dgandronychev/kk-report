@@ -631,3 +631,20 @@ def find_logistics_rows(limit_hours: int = 12) -> tuple[list[str], list[str]]:
                 fios.append(fio)
 
     return tags, fios
+
+def load_tech_plates() -> list[str]:
+    """Возвращает список ГРЗ техничек из Google Sheets (лист "Наши технички")."""
+    gc: Client = gspread.service_account("app/creds.json")
+    sh = gc.open_by_url(GSPREAD_URL_MAIN)
+    ws = sh.worksheet("Наши технички")
+    rows = ws.get_all_values()[1:]
+
+    plates: set[str] = set()
+    for row in rows:
+        if len(row) < 2:
+            continue
+        plate = str(row[1]).strip().upper()
+        if plate:
+            plates.add(plate)
+
+    return sorted(plates)

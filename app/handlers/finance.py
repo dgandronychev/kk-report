@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
+import asyncio
 from typing import Dict, List, Optional
 
 from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
-from app.utils.gsheets import write_in_answers_ras
+from app.utils.gsheets import load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
 from app.utils.max_api import (
     delete_message,
@@ -125,12 +126,25 @@ async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: st
         await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
         return
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
+    parking_grz_options: list[str] = []
+    try:
+        parking_grz_options = await asyncio.to_thread(load_tech_plates)
+    except Exception:
+        logger.exception("failed to load tech plates from google sheets")
     st.flows_by_user[user_id] = FinanceFlow(
         kind="parking",
         step="grz_tech",
-        data={"username": username, "fio": fio},
+        data={"username": username, "fio": fio, "parking_grz_options": parking_grz_options},
     )
-    await _send_plain(st.flows_by_user[user_id], chat_id, "ГРЗ технички:")
+    await _ask_parking_grz(st.flows_by_user[user_id], chat_id)
+
+
+async def _ask_parking_grz(flow: FinanceFlow, chat_id: int) -> None:
+    options = flow.data.get("parking_grz_options") or []
+    if options:
+        await _ask(flow, chat_id, "ГРЗ технички (можно ввести вручную):", options, include_back=False)
+        return
+    await _send_plain(flow, chat_id, "ГРЗ технички:")
 
 
 async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, username: str, msg: dict, kind: str) -> None:
@@ -383,7 +397,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "company":
             if ctrl == "back":
                 flow.step = "grz_tech"
-                await _send_plain(flow, chat_id, "ГРЗ технички:")
+                await _ask_parking_grz(flow, chat_id)
                 return True
             if text.strip() not in _KEY_COMPANY:
                 await _ask(flow, chat_id, "Выберите компанию из списка:", _KEY_COMPANY, include_back=False)

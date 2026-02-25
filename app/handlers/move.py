@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import re
 import logging
+import asyncio
 from typing import Dict, List
 
 from app.config import (
@@ -17,7 +18,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_MOVE_CITY,
     TELEGRAM_THREAD_ID_MOVE_YANDEX,
 )
-from app.utils.gsheets import write_in_answers_ras
+from app.utils.gsheets import load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async
 from app.utils.telegram_api import send_report as send_telegram_report
 from app.utils.max_api import (
@@ -246,8 +247,25 @@ async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg
         return
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    st.flows_by_user[user_id] = MoveFlow(step="grz_tech", data={"username": username, "fio": fio})
-    await _send_plain(st.flows_by_user[user_id], chat_id, "ГРЗ технички:")
+    grz_options: list[str] = []
+    try:
+        grz_options = await asyncio.to_thread(load_tech_plates)
+    except Exception:
+        logger.exception("failed to load tech plates from google sheets")
+
+    st.flows_by_user[user_id] = MoveFlow(
+        step="grz_tech",
+        data={"username": username, "fio": fio, "tech_grz_options": grz_options},
+    )
+    await _ask_tech_grz(st.flows_by_user[user_id], chat_id, "ГРЗ технички (можно ввести вручную):", include_back=False)
+
+
+async def _ask_tech_grz(flow: MoveFlow, chat_id: int, text: str, include_back: bool = True) -> None:
+    options = flow.data.get("tech_grz_options") or []
+    if options:
+        await _ask(flow, chat_id, text, options, include_back=include_back)
+        return
+    await _send_plain(flow, chat_id, text.replace(" (можно ввести вручную)", ""))
 
 
 async def _send_files_prompt(flow: MoveFlow, chat_id: int, text: str) -> None:
@@ -362,7 +380,7 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         flow.data["action"] = text.strip()
         if flow.data["action"] == "Передаете в техничку":
             flow.step = "grz_peredacha"
-            await _send_plain(flow, chat_id, "Кому передаете (ГРЗ технички):")
+            await _ask_tech_grz(flow, chat_id, "Кому передаете (ГРЗ технички, можно ввести вручную):")
             return True
         flow.data["grz_peredacha"] = "-"
         flow.step = "company"
