@@ -282,7 +282,7 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
 def _render_report(flow: FinanceFlow) -> str:
     data = flow.data
     base = "⌚️ " + (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S") + "\n\n"
-    base += f"👷 @{data.get('username', '—')}\n{data.get('fio', '—')}\n\n"
+    base += f"👷 {data.get('fio', '—')}\n\n"
 
     if flow.kind == "parking":
         return (

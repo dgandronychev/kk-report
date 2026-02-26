@@ -19,7 +19,7 @@ DB_PATH = "/clean-car-tire-repair-technician-bot/data/xab_messages.db"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
+##
 # Рабочий вариант
 token_bot = "7608683053:AAEkp6pFtsSsacnou3PyKnBYEPSX-Wc9Qco"
 chat_id_Yandex = -1001739909868
@@ -465,6 +465,21 @@ def step5_move(message, nazad=0):
                     record.append("")
                 record.append(message.text)
             if str(record[Mv.TYPE_ACTION]) == "Забираете со склада":
+                # ВАЖНО: для сценария "Забираете со склада" всегда подтягиваем свежие данные
+                # из Google Sheets непосредственно перед выбором типа/позиции.
+                # Это гарантирует, что дальнейшие варианты будут построены по актуальному состоянию Хаба.
+                try:
+                    load_xab_cache()  # форс-обновление global_xab_cache
+                    # отметим активность пользователя, чтобы не "отпустить" кэш раньше времени
+                    users_with_cache[message.from_user.id] = time.time()
+                except Exception as e:
+                    logging.exception(e)
+                    bot.send_message(
+                        message.chat.id,
+                        "❌ Не удалось обновить остатки Хаба из Google Таблицы. Повторите попытку позже.",
+                        reply_markup = telebot.types.ReplyKeyboardRemove()
+                    )
+                    return
                 bot.send_message(message.chat.id, "Выберите вариант из предложенных:",
                                  reply_markup=getKeyboardList(key_type))
                 bot.register_next_step_handler(message, step_xab_move)
