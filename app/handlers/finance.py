@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, List, Optional
 
 from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
-from app.utils.gsheets import load_tech_plates, write_in_answers_ras
+from app.utils.gsheets import load_parking_task_grz_by_company, load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
 from app.utils.max_api import (
     delete_message,
@@ -72,11 +72,16 @@ async def _send_plain(flow: FinanceFlow, chat_id: int, text: str) -> None:
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
 
-def _find_grz_matches(options: list[str], prefix: str) -> list[str]:
-    token = prefix.strip().upper()
+def _find_grz_matches(company: str, options_by_company: dict[str, list[str]], prefix: str) -> list[str]:
+    token = prefix.lower().strip()
     if not token:
         return []
-    return [value for value in options if value.startswith(token)]
+    options = options_by_company.get(company) or []
+    out = []
+    for value in options:
+        if str(value).strip().lower().startswith(token):
+            out.append(str(value).strip())
+    return sorted(set(out))
 
 def _control(text: str, msg: dict) -> str:
     candidates = [text]
@@ -132,14 +137,24 @@ async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: st
         return
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     parking_grz_options: list[str] = []
+    parking_task_grz_by_company: dict[str, list[str]] = {}
     try:
         parking_grz_options = await asyncio.to_thread(load_tech_plates)
     except Exception:
         logger.exception("failed to load tech plates from google sheets")
+    try:
+        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
+    except Exception:
+        logger.exception("failed to load parking task grz by company from google sheets")
     st.flows_by_user[user_id] = FinanceFlow(
         kind="parking",
         step="grz_tech",
-        data={"username": username, "fio": fio, "parking_grz_options": parking_grz_options},
+        data={
+            "username": username,
+            "fio": fio,
+            "parking_grz_options": parking_grz_options,
+            "parking_task_grz_by_company": parking_task_grz_by_company,
+        },
     )
     await _ask_parking_grz(st.flows_by_user[user_id], chat_id)
 
@@ -160,11 +175,15 @@ async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, u
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     tasks = await get_open_tasks_async(max_chat_id=chat_id)
     parking_grz_options: list[str] = []
+    parking_task_grz_by_company: dict[str, list[str]] = {}
     try:
         parking_grz_options = await asyncio.to_thread(load_tech_plates)
     except Exception:
         logger.exception("failed to load tech plates from google sheets")
-
+    try:
+        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
+    except Exception:
+        logger.exception("failed to load parking task grz by company from google sheets")
     if not tasks and user_id in _FINANCE_STUB_USER_IDS:
         tasks = [
             {
@@ -188,7 +207,13 @@ async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, u
     flow = FinanceFlow(
         kind=kind,
         step="task",
-        data={"username": username, "fio": fio, "tasks": tasks, "parking_grz_options": parking_grz_options},
+        data={
+            "username": username,
+            "fio": fio,
+            "tasks": tasks,
+            "parking_grz_options": parking_grz_options,
+            "parking_task_grz_by_company": parking_task_grz_by_company,
+        },
     )
     st.flows_by_user[user_id] = flow
 
@@ -426,7 +451,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
                 return True
             grz_task = text.strip().upper()
-            matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], grz_task)
+            matches = _find_grz_matches(
+                str(flow.data.get("company") or ""),
+                flow.data.get("parking_task_grz_by_company") or {},
+                grz_task,
+            )
             flow.data["grz_task"] = grz_task
             if matches:
                 flow.step = "grz_task_confirm"
@@ -450,7 +479,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "files":
             if ctrl == "back":
                 flow.step = "grz_task_confirm"
-                matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], flow.data.get("grz_task", ""))
+                matches = _find_grz_matches(
+                    str(flow.data.get("company") or ""),
+                    flow.data.get("parking_task_grz_by_company") or {},
+                    flow.data.get("grz_task", ""),
+                )
                 if matches:
                     await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                     return True
@@ -540,7 +573,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 return True
 
             grz_task = text.strip().upper()
-            matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], grz_task)
+            matches = _find_grz_matches(
+                str(flow.data.get("company") or ""),
+                flow.data.get("parking_task_grz_by_company") or {},
+                grz_task,
+            )
             flow.data["grz_task"] = grz_task
             if matches:
                 flow.step = "grz_task_confirm"
@@ -562,7 +599,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "summa":
             if ctrl == "back":
                 flow.step = "grz_task_confirm"
-                matches = _find_grz_matches(flow.data.get("parking_grz_options") or [], flow.data.get("grz_task", ""))
+                matches = _find_grz_matches(
+                    str(flow.data.get("company") or ""),
+                    flow.data.get("parking_task_grz_by_company") or {},
+                    flow.data.get("grz_task", ""),
+                )
                 if matches:
                     await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                     return True

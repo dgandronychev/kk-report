@@ -648,3 +648,28 @@ def load_tech_plates() -> list[str]:
             plates.add(plate)
 
     return sorted(plates)
+
+def load_parking_task_grz_by_company() -> dict[str, list[str]]:
+    """Возвращает ГРЗ задач для parking, сгруппированные по компании."""
+    gc: Client = gspread.service_account("app/creds.json")
+    sh = gc.open_by_url(GSPREAD_URL_MAIN)
+
+    company_sheets = {
+        "СитиДрайв": ("Перечень ТС Сити", 0),
+        "Яндекс": ("Перечень ТС Яд", 0),
+        "Белка": ("Перечень ТС Белка", 2),
+    }
+
+    out: dict[str, list[str]] = {}
+    for company, (sheet_name, idx) in company_sheets.items():
+        rows = sh.worksheet(sheet_name).get_all_values()[1:]
+        values: set[str] = set()
+        for row in rows:
+            if len(row) <= idx:
+                continue
+            val = str(row[idx]).strip()
+            if val:
+                values.add(val)
+        out[company] = sorted(values)
+
+    return out
