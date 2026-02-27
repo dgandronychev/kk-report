@@ -6,9 +6,26 @@ import logging
 import asyncio
 from typing import Dict, List, Optional
 
-from app.config import DAMAGE_CHAT_ID_BELKA, DAMAGE_CHAT_ID_CITY, DAMAGE_CHAT_ID_YANDEX
+from app.config import (
+    DAMAGE_CHAT_ID_BELKA,
+    DAMAGE_CHAT_ID_CITY,
+    DAMAGE_CHAT_ID_YANDEX,
+    TELEGRAM_CHAT_ID_SBORKA_BELKA,
+    TELEGRAM_CHAT_ID_SBORKA_CITY,
+    TELEGRAM_CHAT_ID_SBORKA_YANDEX,
+    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_BELKA,
+    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_CITY,
+    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX,
+    TELEGRAM_THREAD_ID_FINANCE_PARKING_BELKA,
+    TELEGRAM_THREAD_ID_FINANCE_PARKING_CITY,
+    TELEGRAM_THREAD_ID_FINANCE_PARKING_YANDEX,
+    TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_BELKA,
+    TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_CITY,
+    TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_YANDEX,
+)
 from app.utils.gsheets import load_parking_task_grz_by_company, load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
+from app.utils.telegram_api import send_report as send_telegram_report
 from app.utils.max_api import (
     delete_message,
     extract_message_id,
@@ -39,9 +56,14 @@ _KEY_PAYMENT = ["Бизнес-карта", "Наличные <> Перевод <
 _KEY_PAYMENT_EXTRA = ["Подача на возмещение(свои деньги) + 6%"]
 _FINANCE_STUB_USER_IDS = {199909595}
 
+def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
+    if include_back:
+        return ["Назад", "Выход"], ["fin_back", "fin_exit"]
+    return ["Выход"], ["fin_exit"]
+
+
 async def _ask(flow: FinanceFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
-    controls = ["Выход"] if not include_back else ["Назад", "Выход"]
-    payloads = ["fin_exit"] if not include_back else ["fin_back", "fin_exit"]
+    controls, payloads = _kb_control(include_back=include_back)
 
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
@@ -83,7 +105,8 @@ def _find_grz_matches(company: str, options_by_company: dict[str, list[str]], pr
             out.append(str(value).strip())
     return sorted(set(out))
 
-def _control(text: str, msg: dict) -> str:
+
+def _control_candidates(text: str, msg: dict) -> set[str]:
     candidates = [text]
     callback = msg.get("callback")
     if isinstance(callback, dict):
@@ -94,8 +117,10 @@ def _control(text: str, msg: dict) -> str:
                 value = node.get(key)
                 if isinstance(value, str) and value.strip():
                     candidates.append(value)
+    return {_normalize(v) for v in candidates if isinstance(v, str) and v.strip()}
 
-    norms = {_normalize(v) for v in candidates if isinstance(v, str) and v.strip()}
+def _control(text: str, msg: dict) -> str:
+    norms = _control_candidates(text, msg)
     if "fin_exit" in norms or "выход" in norms:
         return "exit"
     if "fin_back" in norms or "назад" in norms:
@@ -129,6 +154,28 @@ def _company_chat_id(company: str) -> int:
     if company == "Яндекс":
         return int(DAMAGE_CHAT_ID_YANDEX)
     return int(DAMAGE_CHAT_ID_BELKA)
+
+
+def _telegram_target_for_finance(company: str, kind: str) -> tuple[int, int | None]:
+    if company == "СитиДрайв":
+        if kind == "zapravka":
+            return TELEGRAM_CHAT_ID_SBORKA_CITY, (TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_CITY or None)
+        if kind == "expense":
+            return TELEGRAM_CHAT_ID_SBORKA_CITY, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_CITY or None)
+        return TELEGRAM_CHAT_ID_SBORKA_CITY, (TELEGRAM_THREAD_ID_FINANCE_PARKING_CITY or None)
+
+    if company == "Яндекс":
+        if kind == "zapravka":
+            return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_YANDEX or None)
+        if kind == "expense":
+            return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX or None)
+        return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_FINANCE_PARKING_YANDEX or None)
+
+    if kind == "zapravka":
+        return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_BELKA or None)
+    if kind == "expense":
+        return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_BELKA or None)
+    return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_FINANCE_PARKING_BELKA or None)
 
 
 async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
@@ -265,13 +312,31 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
     report = _render_report(flow)
     company = str(flow.data.get("company") or "")
     out_chat = _company_chat_id(company)
+    max_link = ""
     try:
-        await send_text(out_chat, report)
+        response = await send_text(out_chat, report)
+        message_id = extract_message_id(response)
+        if message_id:
+            max_link = f"max://chat/{out_chat}/message/{message_id}"
     except Exception:
         logger.exception("failed to send finance report to company chat")
 
+    telegram_link = ""
     try:
-        _write_sheet(flow)
+        tg_chat_id, tg_thread_id = _telegram_target_for_finance(company, flow.kind)
+        telegram_link = await send_telegram_report(
+            chat_id=tg_chat_id,
+            thread_id=tg_thread_id,
+            text=report,
+            attachments=flow.files,
+        ) or ""
+    except Exception:
+        logger.exception("failed to mirror finance report to telegram")
+
+    report_link = telegram_link or max_link
+
+    try:
+        _write_sheet(flow, report_link)
     except Exception:
         logger.exception("failed to write finance report row")
 
@@ -282,7 +347,7 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
 def _render_report(flow: FinanceFlow) -> str:
     data = flow.data
     base = "⌚️ " + (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S") + "\n\n"
-    base += f"👷 {data.get('fio', '—')}\n\n"
+    base += f"👷 @{data.get('username', '—')}\n{data.get('fio', '—')}\n\n"
 
     if flow.kind == "parking":
         return (
@@ -330,7 +395,7 @@ def _render_report(flow: FinanceFlow) -> str:
     return report
 
 
-def _write_sheet(flow: FinanceFlow) -> None:
+def _write_sheet(flow: FinanceFlow, report_link: str) -> None:
     data = flow.data
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
 
@@ -342,7 +407,7 @@ def _write_sheet(flow: FinanceFlow) -> None:
             data.get("company", ""),
             data.get("grz_tech", ""),
             data.get("grz_task", ""),
-            len(flow.files),
+            report_link,
         ]
         logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Городская парковка", row)
         write_in_answers_ras(row, "Городская парковка")
@@ -357,7 +422,7 @@ def _write_sheet(flow: FinanceFlow) -> None:
             data.get("summa", ""),
             data.get("username", ""),
             data.get("fio", ""),
-            len(flow.files),
+            report_link,
         ]
         logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Заправка техничек", row)
         write_in_answers_ras(row, "Заправка техничек")

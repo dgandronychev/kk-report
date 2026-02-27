@@ -68,14 +68,19 @@ def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
 
 
+def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
+    if include_back:
+        return ["Назад", "Выход"], ["move_back", "move_exit"]
+    return ["Выход"], ["move_exit"]
+
+
 def _is_plate_format(value: str) -> bool:
     cleaned = re.sub(r"\s+", "", str(value).upper())
     return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
 
 
 async def _ask(flow: MoveFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
-    controls = ["Выход"] if not include_back else ["Назад", "Выход"]
-    payloads = ["move_exit"] if not include_back else ["move_back", "move_exit"]
+    controls, payloads = _kb_control(include_back=include_back)
 
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
@@ -103,7 +108,7 @@ async def _send_plain(flow: MoveFlow, chat_id: int, text: str) -> None:
         flow.data["prompt_msg_id"] = msg_id
 
 
-def _control(text: str, msg: dict) -> str:
+def _control_candidates(text: str, msg: dict) -> set[str]:
     candidates = [text]
     callback = msg.get("callback")
     if isinstance(callback, dict):
@@ -115,7 +120,11 @@ def _control(text: str, msg: dict) -> str:
                 if isinstance(value, str) and value.strip():
                     candidates.append(value)
 
-    norms = {_normalize(v) for v in candidates if isinstance(v, str) and v.strip()}
+    return {_normalize(v) for v in candidates if isinstance(v, str) and v.strip()}
+
+
+def _control(text: str, msg: dict) -> str:
+    norms = _control_candidates(text, msg)
     if "move_exit" in norms or "выход" in norms:
         return "exit"
     if "move_back" in norms or "назад" in norms:
@@ -285,6 +294,10 @@ async def _send_files_prompt(flow: MoveFlow, chat_id: int, text: str) -> None:
 
 
 async def _send_items_prompt(flow: MoveFlow, chat_id: int) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
     text = "Позиции:\n" + (get_report_move_str(flow) or "(пока пусто)")
     response = await send_text_with_reply_buttons(
         chat_id=chat_id,
