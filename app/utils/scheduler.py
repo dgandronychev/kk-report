@@ -154,4 +154,4 @@ def _report_loop(schedules: Schedules) -> None:
 
 def start_schedulers(schedules: Schedules = DEFAULT_SCHEDULES) -> None:
     threading.Thread(target=_logistics_loop, args=(schedules,), daemon=True).start()
-    # threading.Thread(target=_report_loop, args=(schedules,), daemon=True).start()
+    threading.Thread(target=_report_loop, args=(schedules,), daemon=True).start()

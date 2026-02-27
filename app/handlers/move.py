@@ -230,6 +230,9 @@ def reset_move_cache() -> None:
     _move_users_with_cache.clear()
 
 
+def get_move_cache_user_ids() -> list[int]:
+    return sorted(_move_users_with_cache.keys())
+
 def _company_chat_id(company: str) -> int:
     if company == "СитиДрайв":
         return int(DAMAGE_CHAT_ID_CITY)

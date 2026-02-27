@@ -12,6 +12,7 @@ import threading
 from typing import Optional
 
 from app.utils.scheduler import start_schedulers
+from app.utils.hub_report import bootstrap_hub_report_state, schedule_hub_report_updates, refresh_hub_reports
 from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN, UPDATE_DATA_ALLOWED_USER_IDS
 from app.utils.http import run_http
 from app.utils.max_api import get_updates, send_text
@@ -43,6 +44,7 @@ from app.handlers.move import (
     reset_move_progress,
     reset_move_cache,
     cleanup_stale_move_cache_users,
+    get_move_cache_user_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -379,6 +381,9 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "обновить данные": "/update_data",
         "reset_move_cache": "/reset_move_cache",
         "очистить кэш move": "/reset_move_cache",
+        "reset_cache": "/reset_cache",
+        "очистить кэш": "/reset_cache",
+        "print_move": "/print_move",
     }
     is_command = False
     if t:
@@ -509,6 +514,19 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         await send_text(chat_id, "✅ Кэш move успешно очищен")
         return
 
+    if t == "/reset_cache":
+        reset_move_cache()
+        await send_text(chat_id, "✅ Кэш успешно очищен")
+        return
+    if t == "/print_move":
+        users = get_move_cache_user_ids()
+        if not users:
+            await send_text(chat_id, "Кэш move не занят")
+            return
+        lines = [f"Пользователь {idx}: {uid}" for idx, uid in enumerate(users, start=1)]
+        await send_text(chat_id, "\n".join(lines))
+        return
+
     # 3) Default
     await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /open_gate")
 
@@ -600,8 +618,15 @@ def run() -> None:
     # HTTP endpoints (/notify, /notify_image, /health)
     threading.Thread(target=run_http, daemon=True).start()
 
-    # Periodic notifications (logistics + report reminders)
+    # Periodic notifications
     start_schedulers()
+
+    bootstrap_hub_report_state()
+    try:
+        refresh_hub_reports()
+    except Exception:
+        logging.exception("initial hub report refresh failed")
+    schedule_hub_report_updates()
 
     try:
         asyncio.run(_warmup_caches())
