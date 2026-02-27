@@ -36,7 +36,14 @@ from app.handlers.finance import (
     try_handle_finance_step,
     reset_finance_progress,
 )
-from app.handlers.move import MoveState, cmd_move, try_handle_move_step, reset_move_progress
+from app.handlers.move import (
+    MoveState,
+    cmd_move,
+    try_handle_move_step,
+    reset_move_progress,
+    reset_move_cache,
+    cleanup_stale_move_cache_users,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +377,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "перемещение": "/move",
         "update_data": "/update_data",
         "обновить данные": "/update_data",
+        "reset_move_cache": "/reset_move_cache",
+        "очистить кэш move": "/reset_move_cache",
     }
     is_command = False
     if t:
@@ -495,6 +504,10 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_move(_move, user_id, chat_id, username, msg)
         return
+    if t == "/reset_move_cache":
+        reset_move_cache()
+        await send_text(chat_id, "✅ Кэш move успешно очищен")
+        return
 
     # 3) Default
     await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /open_gate")
@@ -505,6 +518,7 @@ async def _polling_loop() -> None:
 
     while True:
         try:
+            cleanup_stale_move_cache_users()
             data = await get_updates(marker)
 
             # marker

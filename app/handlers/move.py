@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+import time
 import re
 import logging
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from app.config import (
     DAMAGE_CHAT_ID_BELKA,
@@ -37,6 +38,11 @@ _KEY_WHEEL_TYPE = ["Комплект", "Ось", "Правое колесо", "�
 
 logger = logging.getLogger(__name__)
 
+_MOVE_CACHE_TTL_SECONDS = 1800
+_move_tech_plates_cache: list[str] | None = None
+_move_cache_usage = 0
+_move_users_with_cache: dict[int, float] = {}
+
 @dataclass
 class MoveItem:
     marka_ts: str = ""
@@ -57,6 +63,7 @@ class MoveFlow:
     data: dict = field(default_factory=dict)
     items: List[MoveItem] = field(default_factory=list)
     files: List[dict] = field(default_factory=list)
+    file_keys: Set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -136,22 +143,91 @@ def _control(text: str, msg: dict) -> str:
     return ""
 
 
-def _extract_attachments(msg: dict) -> List[dict]:
-    for node in (
-        msg.get("attachments"),
-        (msg.get("body") or {}).get("attachments") if isinstance(msg.get("body"), dict) else None,
-        (msg.get("payload") or {}).get("attachments") if isinstance(msg.get("payload"), dict) else None,
-    ):
-        if isinstance(node, list):
-            out = []
-            for item in node:
-                if not isinstance(item, dict):
-                    continue
-                t = str(item.get("type") or "")
-                if t in {"image", "video", "file", "audio"}:
-                    out.append({"type": t, "payload": item.get("payload")})
-            return out
-    return []
+def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
+    attachments = msg.get("attachments")
+    if include_nested and not isinstance(attachments, list):
+        body = msg.get("body")
+        if isinstance(body, dict):
+            attachments = body.get("attachments")
+    if include_nested and not isinstance(attachments, list):
+        payload = msg.get("payload")
+        if isinstance(payload, dict):
+            attachments = payload.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    out = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        t = str(item.get("type") or "")
+        if t in {"image", "video", "file", "audio"}:
+            out.append({"type": t, "payload": item.get("payload")})
+    return out
+
+
+def _add_files(flow: MoveFlow, attachments: List[dict], max_files: int) -> int:
+    added = 0
+    for item in attachments:
+        if len(flow.files) >= max_files:
+            break
+        key = f"{item.get('type')}::{item.get('payload')}"
+        if key in flow.file_keys:
+            continue
+        flow.file_keys.add(key)
+        flow.files.append(item)
+        added += 1
+    return added
+
+
+def _load_move_tech_plates_cache() -> list[str]:
+    global _move_tech_plates_cache
+    if _move_tech_plates_cache is None:
+        _move_tech_plates_cache = load_tech_plates()
+    return _move_tech_plates_cache
+
+
+def acquire_move_cache(user_id: int | None = None) -> list[str]:
+    global _move_cache_usage
+    options = _load_move_tech_plates_cache()
+
+    if user_id is None:
+        _move_cache_usage += 1
+        return options
+
+    if user_id not in _move_users_with_cache:
+        _move_cache_usage += 1
+    _move_users_with_cache[user_id] = time.time()
+    return options
+
+
+def cleanup_stale_move_cache_users(timeout_seconds: int = _MOVE_CACHE_TTL_SECONDS) -> None:
+    now = time.time()
+    stale_user_ids = [uid for uid, ts in _move_users_with_cache.items() if now - ts > timeout_seconds]
+    for uid in stale_user_ids:
+        release_move_cache(uid)
+
+
+def release_move_cache(user_id: int) -> None:
+    global _move_cache_usage
+    if user_id in _move_users_with_cache:
+        if _move_cache_usage > 0:
+            _move_cache_usage -= 1
+        _move_users_with_cache.pop(user_id, None)
+    _cleanup_move_cache_if_unused()
+
+
+def _cleanup_move_cache_if_unused() -> None:
+    global _move_tech_plates_cache, _move_cache_usage
+    if _move_cache_usage <= 0 and not _move_users_with_cache:
+        _move_tech_plates_cache = None
+        _move_cache_usage = 0
+
+
+def reset_move_cache() -> None:
+    global _move_tech_plates_cache, _move_cache_usage
+    _move_tech_plates_cache = None
+    _move_cache_usage = 0
+    _move_users_with_cache.clear()
 
 
 def _company_chat_id(company: str) -> int:
@@ -256,11 +332,12 @@ async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg
         return
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
+    cleanup_stale_move_cache_users()
     grz_options: list[str] = []
     try:
-        grz_options = await asyncio.to_thread(load_tech_plates)
+        grz_options = await asyncio.to_thread(acquire_move_cache, user_id)
     except Exception:
-        logger.exception("failed to load tech plates from google sheets")
+        logger.exception("failed to load move cache with tech plates")
 
     st.flows_by_user[user_id] = MoveFlow(
         step="grz_tech",
@@ -350,6 +427,7 @@ async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow
 
     await send_text(chat_id, "Ваша заявка сформирована")
     st.flows_by_user.pop(user_id, None)
+    release_move_cache(user_id)
 
 
 def _render_report(flow: MoveFlow) -> str:
@@ -366,13 +444,18 @@ def _render_report(flow: MoveFlow) -> str:
 
 
 async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
+    cleanup_stale_move_cache_users()
     flow = st.flows_by_user.get(user_id)
     if not flow:
         return False
 
+    if user_id in _move_users_with_cache:
+        _move_users_with_cache[user_id] = time.time()
+
     ctrl = _control(text, msg)
     if ctrl == "exit":
         st.flows_by_user.pop(user_id, None)
+        release_move_cache(user_id)
         await send_text(chat_id, "Оформление отменено")
         return True
 
@@ -537,13 +620,12 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
                 return True
             await _finish_flow(st, user_id, chat_id, flow)
             return True
-        atts = _extract_attachments(msg)
-        if atts:
-            free_slots = max(0, 10 - len(flow.files))
-            flow.files.extend(atts[:free_slots])
-            await send_text(chat_id, f"Файлов добавлено: {len(flow.files)}/10")
+        attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
+        if not attachments:
+            await _send_files_prompt(flow, chat_id, "Прикрепите от 2 до 10 фото")
             return True
-        await send_text(chat_id, "Добавьте вложения или нажмите «Готово»")
+        added = _add_files(flow, attachments, max_files=10)
+        await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}/10")
         return True
 
     return True
@@ -551,3 +633,4 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
 def reset_move_progress(st: MoveState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)
+    release_move_cache(user_id)

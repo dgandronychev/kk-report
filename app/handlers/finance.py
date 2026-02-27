@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from app.config import (
     DAMAGE_CHAT_ID_BELKA,
@@ -43,6 +43,7 @@ class FinanceFlow:
     step: str = ""
     data: dict = field(default_factory=dict)
     files: List[dict] = field(default_factory=list)
+    file_keys: Set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -130,22 +131,40 @@ def _control(text: str, msg: dict) -> str:
     return ""
 
 
-def _extract_attachments(msg: dict) -> List[dict]:
-    for node in (
-        msg.get("attachments"),
-        (msg.get("body") or {}).get("attachments") if isinstance(msg.get("body"), dict) else None,
-        (msg.get("payload") or {}).get("attachments") if isinstance(msg.get("payload"), dict) else None,
-    ):
-        if isinstance(node, list):
-            out = []
-            for item in node:
-                if not isinstance(item, dict):
-                    continue
-                t = str(item.get("type") or "")
-                if t in {"image", "video", "file", "audio"}:
-                    out.append({"type": t, "payload": item.get("payload")})
-            return out
-    return []
+def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
+    attachments = msg.get("attachments")
+    if include_nested and not isinstance(attachments, list):
+        body = msg.get("body")
+        if isinstance(body, dict):
+            attachments = body.get("attachments")
+    if include_nested and not isinstance(attachments, list):
+        payload = msg.get("payload")
+        if isinstance(payload, dict):
+            attachments = payload.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    out = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        t = str(item.get("type") or "")
+        if t in {"image", "video", "file", "audio"}:
+            out.append({"type": t, "payload": item.get("payload")})
+    return out
+
+
+def _add_files(flow: FinanceFlow, attachments: List[dict], max_files: int) -> int:
+    added = 0
+    for item in attachments:
+        if len(flow.files) >= max_files:
+            break
+        key = f"{item.get('type')}::{item.get('payload')}"
+        if key in flow.file_keys:
+            continue
+        flow.file_keys.add(key)
+        flow.files.append(item)
+        added += 1
+    return added
 
 
 def _company_chat_id(company: str) -> int:
@@ -561,10 +580,12 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                     return True
                 await _finish_flow(st, user_id, chat_id, flow)
                 return True
-            atts = _extract_attachments(msg)
-            if atts:
-                flow.files.extend(atts[: max(0, 2 - len(flow.files))])
-                await send_text(chat_id, f"Файлов добавлено: {len(flow.files)}/2")
+            attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
+            if not attachments:
+                await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
+                return True
+            added = _add_files(flow, attachments, max_files=2)
+            await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}/2")
             return True
 
     if flow.kind == "zapravka":
@@ -610,10 +631,12 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                     return True
                 await _finish_flow(st, user_id, chat_id, flow)
                 return True
-            atts = _extract_attachments(msg)
-            if atts:
-                flow.files.extend(atts[: max(0, 3 - len(flow.files))])
-                await send_text(chat_id, f"Файлов добавлено: {len(flow.files)}/3")
+            attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
+            if not attachments:
+                await _send_files_prompt(flow, chat_id, "Добавьте скриншот ППР и фото приборной панели ДО и ПОСЛЕ заправки")
+                return True
+            added = _add_files(flow, attachments, max_files=3)
+            await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}/3")
             return True
 
     if flow.kind == "expense":
@@ -736,11 +759,12 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                     return True
                 await _finish_flow(st, user_id, chat_id, flow)
                 return True
-            atts = _extract_attachments(msg)
-            if atts:
-                free_slots = max(0, 4 - len(flow.files))
-                flow.files.extend(atts[:free_slots])
-                await send_text(chat_id, f"Файлов добавлено: {len(flow.files)}/4")
+            attachments = _extract_attachments(msg, include_nested=not isinstance(msg.get("callback"), dict))
+            if not attachments:
+                await _send_files_prompt(flow, chat_id, "Загрузите фото чека/счета (от 1 до 4 файлов)")
+                return True
+            added = _add_files(flow, attachments, max_files=4)
+            await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}/4")
             return True
 
     if ctrl == "back":
