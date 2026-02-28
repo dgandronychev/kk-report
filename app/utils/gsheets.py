@@ -5,6 +5,7 @@ from gspread import Client, Spreadsheet
 from typing import List, Tuple, Optional, Any
 from datetime import datetime, timedelta, time
 from app.config import URL_GOOGLE_SHEETS_CHART, GSPREAD_URL_MAIN, GSPREAD_URL_ANSWER, GSPREAD_URL_SKLAD, GSPREAD_URL_GATES, GOOGLE_SHEETS_SHIFT
+from app.config import GSPREAD_URL_INFO_FINANCE
 from gspread.exceptions import APIError
 
 EXCEL_EPOCH = datetime(1899, 12, 30)
@@ -194,7 +195,7 @@ def loading_bz_znaniya(company: str) -> list[list[str]]:
 def load_expense_guide() -> dict[str, list[str]]:
     """Загружает справочник причин расхода из листа "Справочник"."""
     gc: Client = gspread.service_account("app/creds.json")
-    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+    sh_main = gc.open_by_url(GSPREAD_URL_INFO_FINANCE)
     ws = sh_main.worksheet("Справочник")
     rows = ws.get_all_values()
     if len(rows) < 2:
