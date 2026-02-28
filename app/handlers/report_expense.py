@@ -7,16 +7,14 @@ import logging
 from typing import Dict, List, Set
 
 from app.config import (
-    DAMAGE_CHAT_ID_BELKA,
-    DAMAGE_CHAT_ID_CITY,
-    DAMAGE_CHAT_ID_YANDEX,
-    TELEGRAM_CHAT_ID_SBORKA_BELKA,
-    TELEGRAM_CHAT_ID_SBORKA_CITY,
-    TELEGRAM_CHAT_ID_SBORKA_YANDEX,
-    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_BELKA,
-    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_CITY,
-    TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX,
+    MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR,
+    MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_LOGISTIC,
+    MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_SERVICE,
     TELEGRAM_BOT_TOKEN_FINANCE,
+    TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR,
+    TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_LOGISTIC,
+    TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_SERVICE,
+    GSPREAD_URL_INFO_RASXOD,
 )
 from app.utils.gsheets import load_expense_guide, write_in_answers_ras
 from app.utils.helper import get_open_tasks_async
@@ -108,6 +106,28 @@ async def _send_plain(flow: ReportExpenseFlow, chat_id: int, text: str) -> None:
         flow.data["prompt_msg_id"] = msg_id
 
 
+async def _send_plain_with_controls(flow: ReportExpenseFlow, chat_id: int, text: str, include_back: bool = False) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    button_texts = ["Выход"]
+    button_payloads = ["fin_exit"]
+    if include_back:
+        button_texts.insert(0, "Назад")
+        button_payloads.insert(0, "fin_back")
+
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=text,
+        button_texts=button_texts,
+        button_payloads=button_payloads,
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
 def _extract_attachments(msg: dict) -> list[dict]:
     attachments = msg.get("attachments")
     if not isinstance(attachments, list):
@@ -188,58 +208,107 @@ async def _send_files_prompt(flow: ReportExpenseFlow, chat_id: int, text: str) -
 
 
 def _company_chat_id(company: str) -> int:
-    if company == "СитиДрайв":
-        return int(DAMAGE_CHAT_ID_CITY)
-    if company == "Яндекс":
-        return int(DAMAGE_CHAT_ID_YANDEX)
-    return int(DAMAGE_CHAT_ID_BELKA)
+    if company == "КлинКар":
+        return int(MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR)
+    if company == "КлинКар Сервис":
+        return int(MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_SERVICE)
+    return int(MAX_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_LOGISTIC)
 
 
 def _telegram_target_for_report_expense(company: str) -> tuple[int, int | None]:
-    if company == "СитиДрайв":
-        return TELEGRAM_CHAT_ID_SBORKA_CITY, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_CITY or None)
-    if company == "Яндекс":
-        return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX or None)
-    return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_FINANCE_EXPENSE_BELKA or None)
+    if company == "КлинКар":
+        return TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR, None
+    if company == "КлинКар Сервис":
+        return TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_SERVICE, None
+    return TELEGRAM_CHAT_ID_FINANCE_EXPENSE_CLEANCAR_LOGISTIC, None
 
 
 def _render_report(flow: ReportExpenseFlow) -> str:
     data = flow.data
-    base = "⌚️ " + (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S") + "\n\n"
-    base += f"👷 @{data.get('username', '—')}\n{data.get('fio', '—')}\n\n"
+    now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+    fio = data.get("fio", "")
+    username = data.get("username", "")
+    city = data.get("city", "")
+    direction = data.get("direction", "")
+    organization = data.get("company", "")
+    reason = data.get("reason", "")
+    reason_description = data.get("reason_description", "")
+    pay = data.get("payment", "")
+    payment_extra = data.get("payment_extra", "")
+    invoice_org = data.get("invoice_org", "")
 
-    add_sum = ""
-    if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
-        try:
-            add_sum = str(round(float(data.get("summa", 0)) / 94 * 100, 2)).replace(".", ",")
-        except Exception:
-            add_sum = ""
+    summa_raw = data.get("summa", "")
+    try:
+        summa_num = float(summa_raw)
+        summa_text = str(summa_num).replace(".", ",")
+    except Exception:
+        summa_num = 0.0
+        summa_text = str(summa_raw)
 
     report = (
-        base
-        + f"{data.get('city', '—')}\n"
-        + f"{data.get('direction', 'ШМ')}\n"
-        + f"{data.get('summa', '—')}\n"
+        f"#Отчет\n"
+        f"Дата и время: {now}\n"
+        f"ФИО: {fio}\n"
+        f"Тег ТГ: {username}\n"
+        f"Город: {city}\n"
+        f"Направление: {direction}\n"
+        f"Сумма: {summa_text}\n"
     )
-    if add_sum:
-        report += f"{add_sum}\n\n"
-    report += (
-        f"{data.get('company', '—')}\n"
-        + f"{data.get('payment', '—')}\n"
-        + f"{data.get('reason', '—')}\n\n"
-        + f"#{data.get('grz_tech', '—')}\n"
-        + f"{data.get('grz_task', '—')}"
-    )
-    if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
-        report += "\n\n@Anastasiya_CleanCar, cогласуйте, пожалуйста"
+
+    if payment_extra == "Подача на возмещение(свои деньги) + 6%":
+        plus_6 = round(summa_num / 94 * 100, 2)
+        report += (
+            f"Сумма +6%: {str(plus_6).replace('.', ',')}\n"
+            f"Компания: {organization}\n"
+            f"Вид оплаты: Наличные <> Перевод <> Личная карта\n"
+            f"Подвид оплаты: Подача на возмещение(свои деньги) + 6%\n"
+            f"Причина: {reason}\n"
+            f"Описание причины: {reason_description}\n"
+        )
+    elif payment_extra == "Отчёт из подочётных":
+        report += (
+            f"Компания: {organization}\n"
+            f"Вид оплаты: Наличные <> Перевод <> Личная карта\n"
+            f"Подвид оплаты: Отчёт из подочётных\n"
+            f"Причина: {reason}\n"
+            f"Описание причины: {reason_description}\n"
+        )
+    else:
+        report += (
+            f"Компания: {organization}\n"
+            f"Вид оплаты: {pay}\n"
+            f"Причина: {reason}\n"
+            f"Описание причины: {reason_description}\n"
+        )
+
+    if invoice_org:
+        report += f"Наименование организации по счёту: {invoice_org}\n"
+
+    if pay == "Счёт":
+        if organization == "КлинКар Логистика":
+            report += "\n@Anna_econo, загрузите на оплату, пожалуйста"
+        else:
+            report += "\n@kazminabuh, загрузите на оплату, пожалуйста"
+
+    if payment_extra == "Подача на возмещение(свои деньги) + 6%":
+        report += "\n@Anastasiya_CleanCar, cогласуйте, пожалуйста"
+
     return report
 
 
 def _write_sheet(flow: ReportExpenseFlow, report_link: str) -> None:
     data = flow.data
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+
+    try:
+        summa_num = float(data.get("summa", 0))
+        summa_text = str(summa_num).replace(".", ",")
+    except Exception:
+        summa_text = str(data.get("summa", ""))
+
+    payment_extra = data.get("payment_extra", "")
     add_sum = ""
-    if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
+    if payment_extra == "Подача на возмещение(свои деньги) + 6%":
         try:
             add_sum = str(round(float(data.get("summa", 0)) / 94 * 100, 2)).replace(".", ",")
         except Exception:
@@ -250,23 +319,27 @@ def _write_sheet(flow: ReportExpenseFlow, report_link: str) -> None:
         data.get("fio", ""),
         data.get("username", ""),
         data.get("city", ""),
-        data.get("summa", ""),
+        summa_text,
         add_sum,
         data.get("company", ""),
         data.get("direction", ""),
         data.get("payment", ""),
-        data.get("payment_extra", ""),
+        payment_extra,
         data.get("reason", ""),
         data.get("reason_description", ""),
-        data.get("grz_tech", ""),
-        data.get("grz_task", ""),
+        "",
+        "",
         data.get("invoice_org", ""),
     ]
     logger.info("[REPORT_EXPENSE->GSHEETS] sheet=%s row=%s", "Лист1", row)
-    write_in_answers_ras(row, "Лист1")
+    write_in_answers_ras(row, "Лист1", GSPREAD_URL_INFO_RASXOD)
 
 
 async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow: ReportExpenseFlow) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
     report = _render_report(flow)
     company = str(flow.data.get("company") or "")
 
@@ -282,13 +355,13 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
     telegram_link = ""
     try:
         tg_chat_id, tg_thread_id = _telegram_target_for_report_expense(company)
-        # telegram_link = await send_telegram_report(
-        #     chat_id=tg_chat_id,
-        #     thread_id=tg_thread_id,
-        #     text=report,
-        #     attachments=flow.files,
-        #     bot_token=TELEGRAM_BOT_TOKEN_FINANCE,
-        # ) or ""
+        telegram_link = await send_telegram_report(
+            chat_id=tg_chat_id,
+            thread_id=tg_thread_id,
+            text=report,
+            attachments=flow.files,
+            bot_token=TELEGRAM_BOT_TOKEN_FINANCE,
+        ) or ""
     except Exception:
         logger.exception("failed to mirror report_expense to telegram")
 
@@ -354,7 +427,7 @@ async def cmd_report_expense(st: ReportExpenseState, user_id: int, chat_id: int,
     )
     _sync_task_for_company(flow)
     st.flows_by_user[user_id] = flow
-    await _send_plain(flow, chat_id, "Введите ФИО")
+    await _send_plain_with_controls(flow, chat_id, "Введите ФИО")
 
 
 async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
@@ -533,7 +606,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
             return True
         flow.data["reason"] = text.strip()
         flow.step = "reason_description"
-        await _send_plain(flow, chat_id, "Описание причины расхода")
+        await _send_plain_with_controls(flow, chat_id, "Описание причины расхода", include_back=True)
         return True
 
     if flow.step == "reason_description":
@@ -554,7 +627,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
     if flow.step == "invoice_org":
         if ctrl == "back":
             flow.step = "reason_description"
-            await _send_plain(flow, chat_id, "Описание причины расхода")
+            await _send_plain_with_controls(flow, chat_id, "Описание причины расхода", include_back=True)
             return True
         flow.data["invoice_org"] = text.strip()
         flow.step = "files"
@@ -569,7 +642,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
                 await _send_plain(flow, chat_id, "Укажите наименование организации")
                 return True
             flow.step = "reason_description"
-            await _send_plain(flow, chat_id, "Описание причины расхода")
+            await _send_plain_with_controls(flow, chat_id, "Описание причины расхода", include_back=True)
             return True
         if ctrl == "done":
             if len(flow.files) < 1:
@@ -582,7 +655,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
             await _send_files_prompt(flow, chat_id, "Загрузите фото чека/счета (от 1 до 4 файлов)")
             return True
         added = _add_files(flow, attachments, max_files=4)
-        await _send_files_prompt(flow, chat_id, f"Файлов добавлено: {added}. Текущее количество: {len(flow.files)}/4")
+        await _send_files_prompt(flow, chat_id, f"Текущее количество файлов: {len(flow.files)}/4")
         return True
 
     if ctrl == "back":

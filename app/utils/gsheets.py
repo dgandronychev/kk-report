@@ -529,13 +529,13 @@ async def load_damage_reference_data() -> dict:
     }
 
 
-def write_in_answers_ras(tlist: list, name_sheet: str, max_attempts: int = 3, base_delay: float = 1.0) -> None:
+def write_in_answers_ras(tlist: list, name_sheet: str, URL: str = GSPREAD_URL_ANSWER, max_attempts: int = 3, base_delay: float = 1.0) -> None:
     """Совместимая запись в Google Sheets лист ответов (для damage-потока)."""
     last_error: Optional[Exception] = None
     for attempt in range(1, max_attempts + 1):
         try:
             gc: Client = gspread.service_account("app/creds.json")
-            sh = gc.open_by_url(GSPREAD_URL_ANSWER)
+            sh = gc.open_by_url(URL)
             ws = sh.worksheet(name_sheet)
             _log_sheet_write("append_row", name_sheet, tlist)
             ws.append_row(
