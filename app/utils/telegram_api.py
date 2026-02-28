@@ -9,11 +9,14 @@ from app.config import TELEGRAM_BOT_TOKEN
 
 logger = logging.getLogger(__name__)
 
-_TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
+def _api_base(bot_token: str | None = None) -> str:
+    token = (bot_token or TELEGRAM_BOT_TOKEN or "").strip()
+    if not token:
+        return ""
+    return f"https://api.telegram.org/bot{token}"
 
-
-def is_telegram_enabled() -> bool:
-    return bool(TELEGRAM_BOT_TOKEN)
+def is_telegram_enabled(bot_token: str | None = None) -> bool:
+    return bool(_api_base(bot_token))
 
 
 def _iter_urls(payload: Any) -> Iterable[str]:
@@ -51,12 +54,13 @@ def build_message_link(chat_id: int, message_id: int | str, thread_id: int | Non
     return f"{base}/{message_id}"
 
 
-async def _telegram_call(method: str, payload: dict) -> Optional[dict]:
-    if not is_telegram_enabled():
+async def _telegram_call(method: str, payload: dict, bot_token: str | None = None) -> Optional[dict]:
+    api_base = _api_base(bot_token)
+    if not api_base:
         return None
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(f"{_TELEGRAM_API_BASE}/{method}", json=payload)
+            response = await client.post(f"{api_base}/{method}", json=payload)
     except Exception:
         logger.exception("telegram call failed with exception | method=%s", method)
         return None
@@ -72,15 +76,15 @@ async def _telegram_call(method: str, payload: dict) -> Optional[dict]:
     return data
 
 
-async def send_text(chat_id: int, text: str, thread_id: int | None = None) -> Optional[str]:
-    if not is_telegram_enabled():
+async def send_text(chat_id: int, text: str, thread_id: int | None = None, bot_token: str | None = None) -> Optional[str]:
+    if not is_telegram_enabled(bot_token):
         return None
 
     payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if thread_id:
         payload["message_thread_id"] = thread_id
 
-    data = await _telegram_call("sendMessage", payload)
+    data = await _telegram_call("sendMessage", payload, bot_token=bot_token)
     if not isinstance(data, dict):
         return None
     result = data.get("result")
@@ -98,8 +102,9 @@ async def send_report(
     text: str,
     attachments: Optional[list[dict]] = None,
     thread_id: int | None = None,
+    bot_token: str | None = None,
 ) -> Optional[str]:
-    if not is_telegram_enabled():
+    if not is_telegram_enabled(bot_token):
         return None
 
     files = attachments or []
@@ -128,15 +133,15 @@ async def send_report(
         if thread_id:
             payload["message_thread_id"] = thread_id
 
-        data = await _telegram_call("sendMediaGroup", payload)
+        data = await _telegram_call("sendMediaGroup", payload, bot_token=bot_token)
         if not isinstance(data, dict):
             logger.warning("sendMediaGroup failed, falling back to sendMessage")
-            return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
+            return await send_text(chat_id=chat_id, text=text, thread_id=thread_id, bot_token=bot_token)
         result = data.get("result")
         if isinstance(result, list) and result and isinstance(result[0], dict):
             message_id = result[0].get("message_id")
             if message_id is not None:
                 return build_message_link(chat_id, message_id, thread_id=thread_id)
-        return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
+        return await send_text(chat_id=chat_id, text=text, thread_id=thread_id, bot_token=bot_token)
 
-    return await send_text(chat_id=chat_id, text=text, thread_id=thread_id)
+    return await send_text(chat_id=chat_id, text=text, thread_id=thread_id, bot_token=bot_token)

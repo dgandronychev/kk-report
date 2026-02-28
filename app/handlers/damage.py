@@ -23,6 +23,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_SBORKA_BELKA,
     TELEGRAM_THREAD_ID_SBORKA_CITY,
     TELEGRAM_THREAD_ID_SBORKA_YANDEX,
+    TELEGRAM_BOT_TOKEN_INCEDENT,
 )
 from app.utils.gsheets import get_number_util, load_damage_reference_data, write_in_answers_ras
 from app.utils.drive_zip import safe_zip_name, build_zip_from_max_attachments, upload_zip_private
@@ -421,7 +422,7 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
     response = await send_message(chat_id=out_chat, text=report, attachments=flow.files)
     tg_chat_id, tg_thread_id = _telegram_target_for_damage(data)
     telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report,
-                                               attachments=flow.files)
+                                               attachments=flow.files, bot_token=TELEGRAM_BOT_TOKEN_INCEDENT)
     msg_ref = ""
     message_id = extract_message_id(response if isinstance(response, dict) else None)
     if message_id:

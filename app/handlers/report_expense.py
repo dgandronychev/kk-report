@@ -16,6 +16,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_FINANCE_EXPENSE_BELKA,
     TELEGRAM_THREAD_ID_FINANCE_EXPENSE_CITY,
     TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX,
+    TELEGRAM_BOT_TOKEN_FINANCE,
 )
 from app.utils.gsheets import load_expense_guide, load_parking_task_grz_by_company, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
@@ -296,6 +297,7 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
             thread_id=tg_thread_id,
             text=report,
             attachments=flow.files,
+            bot_token=TELEGRAM_BOT_TOKEN_FINANCE,
         ) or ""
     except Exception:
         logger.exception("failed to mirror report_expense to telegram")

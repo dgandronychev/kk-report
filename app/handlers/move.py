@@ -18,6 +18,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_MOVE_BELKA,
     TELEGRAM_THREAD_ID_MOVE_CITY,
     TELEGRAM_THREAD_ID_MOVE_YANDEX,
+    TELEGRAM_BOT_TOKEN_TECHNIK,
 )
 from app.utils.gsheets import load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async
@@ -410,6 +411,7 @@ async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow
             thread_id=tg_thread_id,
             text=text,
             attachments=flow.files,
+            bot_token=TELEGRAM_BOT_TOKEN_TECHNIK,
         ) or ""
     except Exception:
         logger.exception("failed to mirror move report to telegram")

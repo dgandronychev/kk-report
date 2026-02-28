@@ -22,6 +22,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_BELKA,
     TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_CITY,
     TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_YANDEX,
+    TELEGRAM_BOT_TOKEN_TECHNIK,
 )
 from app.utils.gsheets import load_parking_task_grz_by_company, load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
@@ -348,6 +349,7 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
             thread_id=tg_thread_id,
             text=report,
             attachments=flow.files,
+            bot_token=TELEGRAM_BOT_TOKEN_TECHNIK,
         ) or ""
     except Exception:
         logger.exception("failed to mirror finance report to telegram")

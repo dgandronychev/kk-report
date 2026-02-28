@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict
 
-from app.config import SBORKA_CHAT_ID_CITY, TELEGRAM_CHAT_ID_GATES, TELEGRAM_THREAD_ID_GATES_CITY, TELEGRAM_THREAD_ID_GATES_YANDEX
+from app.config import SBORKA_CHAT_ID_CITY, TELEGRAM_CHAT_ID_GATES, TELEGRAM_THREAD_ID_GATES_CITY, TELEGRAM_THREAD_ID_GATES_YANDEX, TELEGRAM_BOT_TOKEN_INCEDENT
 from app.utils.gsheets import find_logistics_rows, write_open_gate_row
 from app.utils.helper import get_fio_async
 from app.utils.max_api import send_message, send_text, send_text_with_reply_buttons
@@ -95,7 +95,7 @@ async def try_handle_open_gate_step(st: OpenGateState, user_id: int, chat_id: in
     target_chat = int(SBORKA_CHAT_ID_CITY)
     await send_message(chat_id=target_chat, text=send_text_value)
     tg_chat_id, tg_thread_id = _telegram_target_for_gate(company)
-    await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=send_text_value)
+    await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=send_text_value, bot_token=TELEGRAM_BOT_TOKEN_INCEDENT)
 
     try:
         write_open_gate_row(

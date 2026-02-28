@@ -16,6 +16,7 @@ from app.config import (
     TELEGRAM_THREAD_ID_SBORKA_BELKA,
     TELEGRAM_THREAD_ID_SBORKA_CITY,
     TELEGRAM_THREAD_ID_SBORKA_YANDEX,
+    TELEGRAM_BOT_TOKEN_INCEDENT,
 )
 from app.utils.helper import get_fio_async
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
@@ -447,7 +448,7 @@ async def _finalize(st: SborkaState, user_id: int, chat_id: int, msg: dict) -> b
     out_chat = _company_chat(data["company"])
     response = await send_message(chat_id=out_chat, text=report, attachments=flow.files)
     tg_chat_id, tg_thread_id = _telegram_target_for_sborka(data["company"])
-    telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report, attachments=flow.files)
+    telegram_link = await send_telegram_report(chat_id=tg_chat_id, thread_id=tg_thread_id, text=report, attachments=flow.files, bot_token=TELEGRAM_BOT_TOKEN_INCEDENT)
 
     try:
         if data.get("type") == "check":
