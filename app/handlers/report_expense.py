@@ -47,6 +47,7 @@ class ReportExpenseState:
 
 
 _KEY_CITY = ["Москва", "Санкт-Петербург", "Нижний Новгород", "Другое"]
+_KEY_COMPANY = ["КлинКар", "КлинКар Сервис", "КлинКар Логистика"]
 _KEY_PAYMENT = ["Бизнес-карта", "Наличные <> Перевод <> Личная карта", "Счёт", "Отчетные документы(УПД/акты и тд.)", "Другое"]
 _KEY_PAYMENT_EXTRA = ["Подача на возмещение(свои деньги) + 6%", "Отчёт из подочётных"]
 
@@ -303,14 +304,6 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
 
 
 
-def _company_options_from_tasks(tasks: list[dict]) -> list[str]:
-    out: list[str] = []
-    for task in tasks:
-        company = str(task.get("carsharing__name") or "").strip()
-        if company and company not in out:
-            out.append(company)
-    return out
-
 
 def _sync_task_for_company(flow: ReportExpenseFlow) -> None:
     tasks = flow.data.get("tasks") or []
@@ -347,15 +340,13 @@ async def cmd_report_expense(st: ReportExpenseState, user_id: int, chat_id: int,
         await send_text(chat_id, "У вас нет активной задачи")
         return
 
-    company_options = _company_options_from_tasks(tasks)
-    initial_company = company_options[0] if company_options else ""
+    initial_company = _KEY_COMPANY[0]
 
     flow = ReportExpenseFlow(
         step="fio",
         data={
             "username": username,
             "tasks": tasks,
-            "company_options": company_options,
             "company": initial_company,
             "expense_guide": expense_guide,
             "grz_task": "",
@@ -469,7 +460,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
             await send_text(chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
         flow.step = "org"
-        await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", flow.data.get("company_options") or [])
+        await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", _KEY_COMPANY)
         return True
 
     if flow.step == "org":
@@ -478,7 +469,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
             await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
         company = text.strip()
-        options = flow.data.get("company_options") or []
+        options = _KEY_COMPANY
         if company not in options:
             await _ask(flow, chat_id, "Вы ввели компанию не из предложенного списка.\nУкажите компанию, с которой произведен расход", options)
             return True
@@ -491,7 +482,7 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
     if flow.step == "payment":
         if ctrl == "back":
             flow.step = "org"
-            await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", flow.data.get("company_options") or [])
+            await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", _KEY_COMPANY)
             return True
         if text.strip() == "Другое":
             flow.step = "payment_custom"
