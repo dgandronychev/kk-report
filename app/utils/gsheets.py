@@ -190,6 +190,35 @@ def loading_bz_znaniya(company: str) -> list[list[str]]:
     sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
     return sh_main.worksheet(company).get_all_values()[1:]
 
+
+def load_expense_guide() -> dict[str, list[str]]:
+    """Загружает справочник причин расхода из листа "Справочник"."""
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+    ws = sh_main.worksheet("Справочник")
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return {}
+
+    headers = rows[0]
+    body = rows[1:]
+    result: dict[str, list[str]] = {}
+
+    for idx, header in enumerate(headers):
+        name = str(header).strip()
+        if not name:
+            continue
+        values: list[str] = []
+        for row in body:
+            if idx >= len(row):
+                continue
+            value = str(row[idx]).strip()
+            if value:
+                values.append(value)
+        result[name] = values
+
+    return result
+
 async def load_nomenclature_reference_data() -> dict:
     gc: Client = gspread.service_account("app/creds.json")
     sh_main = gc.open_by_url(GSPREAD_URL_MAIN)

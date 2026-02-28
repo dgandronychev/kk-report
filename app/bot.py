@@ -37,6 +37,12 @@ from app.handlers.finance import (
     try_handle_finance_step,
     reset_finance_progress,
 )
+from app.handlers.report_expense import (
+    ReportExpenseState,
+    cmd_report_expense,
+    try_handle_report_expense_step,
+    reset_report_expense_progress,
+)
 from app.handlers.move import (
     MoveState,
     cmd_move,
@@ -73,6 +79,7 @@ _soberi = SoberiState()
 _nomenclature = NomenclatureState()
 _open_gate = OpenGateState()
 _finance = FinanceState()
+_report_expense = ReportExpenseState()
 _move = MoveState()
 
 # ===== MAX update parsing helpers =====
@@ -342,6 +349,7 @@ def _reset_user_progress(user_id: int, chat_id: int) -> None:
     reset_nomenclature_progress(_nomenclature, user_id)
     reset_open_gate_progress(_open_gate, user_id)
     reset_finance_progress(_finance, user_id)
+    reset_report_expense_progress(_report_expense, user_id)
     reset_move_progress(_move, user_id)
     work_shift.reset_work_shift_progress(_shift, user_id, chat_id)
 
@@ -375,6 +383,7 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "парковка": "/parking",
         "заправка": "/zapravka",
         "расход": "/expense",
+        "report_expense": "/report_expense",
         "move": "/move",
         "перемещение": "/move",
         "update_data": "/update_data",
@@ -422,6 +431,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     if await try_handle_open_gate_step(_open_gate, user_id, chat_id, t, msg):
         return
     if await try_handle_finance_step(_finance, user_id, chat_id, t, msg):
+        return
+    if await try_handle_report_expense_step(_report_expense, user_id, chat_id, t, msg):
         return
     if await try_handle_move_step(_move, user_id, chat_id, t, msg):
         return
@@ -503,6 +514,11 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_expense(_finance, user_id, chat_id, username, msg)
+        return
+    if t == "/report_expense":
+        sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+        username = str(sender.get("username") or sender.get("first_name") or user_id)
+        await cmd_report_expense(_report_expense, user_id, chat_id, username, msg)
         return
     if t == "/move":
         sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
