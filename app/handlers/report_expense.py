@@ -227,7 +227,6 @@ def _render_report(flow: ReportExpenseFlow) -> str:
     data = flow.data
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
     fio = data.get("fio", "")
-    username = data.get("username", "")
     city = data.get("city", "")
     direction = data.get("direction", "")
     organization = data.get("company", "")
@@ -249,7 +248,6 @@ def _render_report(flow: ReportExpenseFlow) -> str:
         f"#Отчет\n"
         f"Дата и время: {now}\n"
         f"ФИО: {fio}\n"
-        f"Тег ТГ: {username}\n"
         f"Город: {city}\n"
         f"Направление: {direction}\n"
         f"Сумма: {summa_text}\n"
@@ -296,7 +294,7 @@ def _render_report(flow: ReportExpenseFlow) -> str:
     return report
 
 
-def _write_sheet(flow: ReportExpenseFlow, report_link: str) -> None:
+def _write_sheet(flow: ReportExpenseFlow) -> None:
     data = flow.data
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
 
@@ -317,7 +315,7 @@ def _write_sheet(flow: ReportExpenseFlow, report_link: str) -> None:
     row = [
         now,
         data.get("fio", ""),
-        data.get("username", ""),
+        "",
         data.get("city", ""),
         summa_text,
         add_sum,
@@ -367,7 +365,7 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
 
     report_link = telegram_link or max_link
     try:
-        _write_sheet(flow, report_link)
+        _write_sheet(flow)
     except Exception:
         logger.exception("failed to write report_expense row")
 
