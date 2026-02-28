@@ -18,8 +18,8 @@ from app.config import (
     TELEGRAM_THREAD_ID_FINANCE_EXPENSE_YANDEX,
     TELEGRAM_BOT_TOKEN_FINANCE,
 )
-from app.utils.gsheets import load_expense_guide, load_parking_task_grz_by_company, write_in_answers_ras
-from app.utils.helper import get_fio_async, get_open_tasks_async
+from app.utils.gsheets import load_expense_guide, write_in_answers_ras
+from app.utils.helper import get_open_tasks_async
 from app.utils.max_api import (
     delete_message,
     extract_message_id,
@@ -46,7 +46,7 @@ class ReportExpenseState:
     flows_by_user: Dict[int, ReportExpenseFlow] = field(default_factory=dict)
 
 
-_KEY_CITY = ["Москва", "Санкт-Петербург"]
+_KEY_CITY = ["Москва", "Санкт-Петербург", "Нижний Новгород", "Другое"]
 _KEY_PAYMENT = ["Бизнес-карта", "Наличные <> Перевод <> Личная карта", "Счёт", "Отчетные документы(УПД/акты и тд.)", "Другое"]
 _KEY_PAYMENT_EXTRA = ["Подача на возмещение(свои деньги) + 6%", "Отчёт из подочётных"]
 
@@ -142,18 +142,6 @@ def _add_files(flow: ReportExpenseFlow, attachments: list[dict], max_files: int)
         flow.files.append(item)
         added += 1
     return added
-
-
-def _find_grz_matches(company: str, options_by_company: dict[str, list[str]], prefix: str) -> list[str]:
-    token = prefix.lower().strip()
-    if not token:
-        return []
-    options = options_by_company.get(company) or []
-    out = []
-    for value in options:
-        if str(value).strip().lower().startswith(token):
-            out.append(str(value).strip())
-    return sorted(set(out))
 
 
 def _expense_directions(flow: ReportExpenseFlow) -> list[str]:
@@ -313,19 +301,33 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
     st.flows_by_user.pop(user_id, None)
 
 
+
+
+def _company_options_from_tasks(tasks: list[dict]) -> list[str]:
+    out: list[str] = []
+    for task in tasks:
+        company = str(task.get("carsharing__name") or "").strip()
+        if company and company not in out:
+            out.append(company)
+    return out
+
+
+def _sync_task_for_company(flow: ReportExpenseFlow) -> None:
+    tasks = flow.data.get("tasks") or []
+    company = str(flow.data.get("company") or "").strip()
+    for task in tasks:
+        if str(task.get("carsharing__name") or "").strip() == company:
+            flow.data["grz_tech"] = str(task.get("car_plate") or "—")
+            return
+    flow.data["grz_tech"] = "—"
+
 async def cmd_report_expense(st: ReportExpenseState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     if chat_id < 0:
         await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
         return
 
-    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     tasks = await get_open_tasks_async(max_chat_id=chat_id)
-    parking_task_grz_by_company: dict[str, list[str]] = {}
     expense_guide: dict[str, list[str]] = {}
-    try:
-        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
-    except Exception:
-        logger.exception("failed to load parking task grz by company from google sheets")
     try:
         expense_guide = await asyncio.to_thread(load_expense_guide)
     except Exception:
@@ -345,32 +347,23 @@ async def cmd_report_expense(st: ReportExpenseState, user_id: int, chat_id: int,
         await send_text(chat_id, "У вас нет активной задачи")
         return
 
-    task_buttons = []
-    for task in tasks:
-        plate = str(task.get("car_plate") or "—")
-        company = str(task.get("carsharing__name") or "—")
-        task_buttons.append(f"{plate} | {company}")
+    company_options = _company_options_from_tasks(tasks)
+    initial_company = company_options[0] if company_options else ""
 
     flow = ReportExpenseFlow(
-        step="task",
+        step="fio",
         data={
             "username": username,
-            "fio": fio,
             "tasks": tasks,
-            "parking_task_grz_by_company": parking_task_grz_by_company,
+            "company_options": company_options,
+            "company": initial_company,
             "expense_guide": expense_guide,
+            "grz_task": "",
         },
     )
+    _sync_task_for_company(flow)
     st.flows_by_user[user_id] = flow
-
-    if len(task_buttons) == 1:
-        flow.data["grz_tech"] = str(tasks[0].get("car_plate") or "—")
-        flow.data["company"] = str(tasks[0].get("carsharing__name") or "—")
-        flow.step = "city"
-        await _ask(flow, chat_id, f"Активная задача:\nГРЗ технички: {flow.data['grz_tech']}\nКомпания: {flow.data['company']}\nВыберите город из списка или введите вручную:", _KEY_CITY, include_back=False)
-        return
-
-    await _ask(flow, chat_id, "У вас несколько активных задач.\nВыберите задачу:", task_buttons, include_back=False)
+    await _send_plain(flow, chat_id, "Введите ФИО")
 
 
 async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
@@ -384,122 +377,142 @@ async def try_handle_report_expense_step(st: ReportExpenseState, user_id: int, c
         await send_text(chat_id, "Оформление отменено")
         return True
 
-    if flow.step == "task":
-        tasks = flow.data.get("tasks") or []
+    if flow.step == "fio":
         if ctrl == "back":
-            await send_text(chat_id, "Для выбора задачи используйте кнопку из списка")
+            await send_text(chat_id, "Это первый шаг сценария")
             return True
-        chosen = None
-        for task in tasks:
-            plate = str(task.get("car_plate") or "—")
-            company = str(task.get("carsharing__name") or "—")
-            if text.strip() == f"{plate} | {company}":
-                chosen = task
-                break
-        if not chosen:
-            await send_text(chat_id, "Выберите задачу кнопкой из списка")
+        fio = text.strip()
+        if not fio:
+            await _send_plain(flow, chat_id, "Введите ФИО")
             return True
-        flow.data["grz_tech"] = str(chosen.get("car_plate") or "—")
-        flow.data["company"] = str(chosen.get("carsharing__name") or "—")
+        flow.data["fio"] = fio
         flow.step = "city"
-        await _ask(flow, chat_id, f"Активная задача:\nГРЗ технички: {flow.data['grz_tech']}\nКомпания: {flow.data['company']}\nВыберите город из списка или введите вручную:", _KEY_CITY, include_back=False)
+        await _ask(flow, chat_id, "Укажите Ваш город", _KEY_CITY)
         return True
 
     if flow.step == "city":
         if ctrl == "back":
-            tasks = flow.data.get("tasks") or []
-            if len(tasks) > 1:
-                flow.step = "task"
-                buttons = [f"{str(t.get('car_plate') or '—')} | {str(t.get('carsharing__name') or '—')}" for t in tasks]
-                await _ask(flow, chat_id, "У вас несколько активных задач.\nВыберите задачу:", buttons, include_back=False)
-            else:
-                await send_text(chat_id, "Это первый шаг сценария")
+            flow.step = "fio"
+            await _send_plain(flow, chat_id, "Введите ФИО")
+            return True
+        if text.strip() == "Другое":
+            flow.step = "city_custom"
+            await _send_plain(flow, chat_id, "Введите название Вашего города")
             return True
         flow.data["city"] = text.strip()
         directions = _expense_directions(flow)
+        flow.step = "direction"
         if directions:
-            flow.step = "direction"
             await _ask(flow, chat_id, "Укажите направление, для которого производится расход", directions)
             return True
-        flow.data["direction"] = "ШМ"
-        flow.step = "grz_task"
-        await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+        await _send_plain(flow, chat_id, "Введите направление")
+        return True
+
+    if flow.step == "city_custom":
+        if ctrl == "back":
+            flow.step = "city"
+            await _ask(flow, chat_id, "Укажите Ваш город", _KEY_CITY)
+            return True
+        flow.data["city"] = text.strip()
+        directions = _expense_directions(flow)
+        flow.step = "direction"
+        if directions:
+            await _ask(flow, chat_id, "Укажите направление, для которого производится расход", directions)
+            return True
+        await _send_plain(flow, chat_id, "Введите направление")
         return True
 
     if flow.step == "direction":
         if ctrl == "back":
             flow.step = "city"
-            await _ask(flow, chat_id, "Выберите город из списка или введите вручную:", _KEY_CITY, include_back=False)
+            await _ask(flow, chat_id, "Укажите Ваш город", _KEY_CITY)
+            return True
+        if text.strip() == "Другое":
+            flow.step = "direction_custom"
+            await _send_plain(flow, chat_id, "Введите направление")
             return True
         flow.data["direction"] = text.strip()
-        flow.step = "grz_task"
-        await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
-        return True
-
-    if flow.step == "grz_task":
-        if ctrl == "back":
-            directions = _expense_directions(flow)
-            if directions:
-                flow.step = "direction"
-                await _ask(flow, chat_id, "Укажите направление, для которого производится расход", directions)
-                return True
-            flow.step = "city"
-            await _ask(flow, chat_id, "Выберите город из списка или введите вручную:", _KEY_CITY, include_back=False)
-            return True
-        grz_task = text.strip().upper()
-        flow.data["grz_task"] = grz_task
-        matches = _find_grz_matches(str(flow.data.get("company") or ""), flow.data.get("parking_task_grz_by_company") or {}, grz_task)
-        if matches:
-            flow.step = "grz_task_confirm"
-            await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
-            return True
         flow.step = "summa"
-        await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
         await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
         return True
 
-    if flow.step == "grz_task_confirm":
+    if flow.step == "direction_custom":
         if ctrl == "back":
-            flow.step = "grz_task"
-            await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+            directions = _expense_directions(flow)
+            flow.step = "direction"
+            if directions:
+                await _ask(flow, chat_id, "Укажите направление, для которого производится расход", directions)
+                return True
+            await _send_plain(flow, chat_id, "Введите направление")
             return True
-        flow.data["grz_task"] = text.strip().upper()
+        flow.data["direction"] = text.strip()
         flow.step = "summa"
         await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
         return True
 
     if flow.step == "summa":
         if ctrl == "back":
-            flow.step = "grz_task_confirm"
-            matches = _find_grz_matches(str(flow.data.get("company") or ""), flow.data.get("parking_task_grz_by_company") or {}, str(flow.data.get("grz_task") or ""))
-            if matches:
-                await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
+            directions = _expense_directions(flow)
+            flow.step = "direction"
+            if directions:
+                await _ask(flow, chat_id, "Укажите направление, для которого производится расход", directions)
                 return True
-            flow.step = "grz_task"
-            await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+            await _send_plain(flow, chat_id, "Введите направление")
+            return True
+        raw_sum = text.strip()
+        if "," in raw_sum:
+            await send_text(chat_id, "Используйте точку как разделитель, пример: 5678.91")
             return True
         try:
-            flow.data["summa"] = float(text.strip().replace(",", "."))
+            flow.data["summa"] = float(raw_sum)
         except Exception:
             await send_text(chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
+        flow.step = "org"
+        await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", flow.data.get("company_options") or [])
+        return True
+
+    if flow.step == "org":
+        if ctrl == "back":
+            flow.step = "summa"
+            await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+            return True
+        company = text.strip()
+        options = flow.data.get("company_options") or []
+        if company not in options:
+            await _ask(flow, chat_id, "Вы ввели компанию не из предложенного списка.\nУкажите компанию, с которой произведен расход", options)
+            return True
+        flow.data["company"] = company
+        _sync_task_for_company(flow)
         flow.step = "payment"
         await _ask(flow, chat_id, "Способ оплаты:", _KEY_PAYMENT)
         return True
 
     if flow.step == "payment":
         if ctrl == "back":
-            flow.step = "summa"
-            await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+            flow.step = "org"
+            await _ask(flow, chat_id, "Укажите компанию, с которой произведен расход", flow.data.get("company_options") or [])
             return True
-        if text.strip() not in _KEY_PAYMENT:
-            await _ask(flow, chat_id, "Выберите способ оплаты из списка:", _KEY_PAYMENT)
+        if text.strip() == "Другое":
+            flow.step = "payment_custom"
+            await _send_plain(flow, chat_id, "Укажите способ оплаты в произвольной форме")
             return True
         flow.data["payment"] = text.strip()
         if flow.data["payment"] == "Наличные <> Перевод <> Личная карта":
             flow.step = "payment_extra"
             await _ask(flow, chat_id, "Выберите из следующих категорий:", _KEY_PAYMENT_EXTRA)
             return True
+        flow.data["payment_extra"] = ""
+        flow.step = "reason"
+        await _ask_expense_reason(flow, chat_id)
+        return True
+
+    if flow.step == "payment_custom":
+        if ctrl == "back":
+            flow.step = "payment"
+            await _ask(flow, chat_id, "Способ оплаты:", _KEY_PAYMENT)
+            return True
+        flow.data["payment"] = text.strip()
         flow.data["payment_extra"] = ""
         flow.step = "reason"
         await _ask_expense_reason(flow, chat_id)
