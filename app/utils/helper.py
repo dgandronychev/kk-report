@@ -151,7 +151,7 @@ async def get_open_tasks_async(max_chat_id: int) -> list[dict]:
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(URL_GET_INFO_TASK, params={"chat_id": str(max_chat_id)})
+            response = await client.get(URL_GET_INFO_TASK, params={"max_chat_id": str(max_chat_id)})
 
         response.raise_for_status()
         parsed = response.json()

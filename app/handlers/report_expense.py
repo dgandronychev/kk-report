@@ -29,8 +29,9 @@ from app.utils.max_api import (
 )
 from app.utils.telegram_api import send_report as send_telegram_report
 
-logger = logging.getLogger(__name__)
+_FINANCE_STUB_USER_IDS = {199909595}
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ReportExpenseFlow:
@@ -292,13 +293,13 @@ async def _finish_flow(st: ReportExpenseState, user_id: int, chat_id: int, flow:
     telegram_link = ""
     try:
         tg_chat_id, tg_thread_id = _telegram_target_for_report_expense(company)
-        telegram_link = await send_telegram_report(
-            chat_id=tg_chat_id,
-            thread_id=tg_thread_id,
-            text=report,
-            attachments=flow.files,
-            bot_token=TELEGRAM_BOT_TOKEN_FINANCE,
-        ) or ""
+        # telegram_link = await send_telegram_report(
+        #     chat_id=tg_chat_id,
+        #     thread_id=tg_thread_id,
+        #     text=report,
+        #     attachments=flow.files,
+        #     bot_token=TELEGRAM_BOT_TOKEN_FINANCE,
+        # ) or ""
     except Exception:
         logger.exception("failed to mirror report_expense to telegram")
 
@@ -329,6 +330,16 @@ async def cmd_report_expense(st: ReportExpenseState, user_id: int, chat_id: int,
         expense_guide = await asyncio.to_thread(load_expense_guide)
     except Exception:
         logger.exception("failed to load expense guide from google sheets")
+
+    if not tasks and user_id in _FINANCE_STUB_USER_IDS:
+        tasks = [
+            {
+                "task_type": "Перегон СШМ",
+                "carsharing__name": "Тестовая компания",
+                "car_plate": "Т000ТТ000",
+                "car_model": "TestCar",
+            }
+        ]
 
     if not tasks:
         await send_text(chat_id, "У вас нет активной задачи")
