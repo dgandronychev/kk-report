@@ -5,12 +5,10 @@ from typing import Any, Iterable, Optional
 
 import httpx
 
-from app.config import TELEGRAM_BOT_TOKEN
-
 logger = logging.getLogger(__name__)
 
 def _api_base(bot_token: str | None = None) -> str:
-    token = (bot_token or TELEGRAM_BOT_TOKEN or "").strip()
+    token = bot_token.strip()
     if not token:
         return ""
     return f"https://api.telegram.org/bot{token}"

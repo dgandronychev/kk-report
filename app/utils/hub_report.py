@@ -16,7 +16,7 @@ from gspread import Client, Spreadsheet
 from app.config import (
     GSPREAD_URL_ANSWER,
     HUB_REPORT_DB_PATH,
-    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_BOT_TOKEN_TECHNIK,
     TELEGRAM_CHAT_ID_SBORKA_BELKA,
     TELEGRAM_CHAT_ID_SBORKA_CITY,
     TELEGRAM_CHAT_ID_SBORKA_YANDEX,
@@ -27,7 +27,7 @@ from app.config import (
 
 logger = logging.getLogger(__name__)
 
-_TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
+_TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN_TECHNIK}" if TELEGRAM_BOT_TOKEN_TECHNIK else ""
 
 _last_message_ids: dict[str, int | list[int]] = {
     "Яндекс": 0,
