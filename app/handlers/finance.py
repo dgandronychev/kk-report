@@ -154,6 +154,11 @@ def _is_plate_format(value: str) -> bool:
     cleaned = re.sub(r"\s+", "", str(value).upper())
     return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
 
+
+def _is_exact_grz_match(value: str, matches: list[str]) -> bool:
+    needle = value.strip().lower()
+    return any(str(match).strip().lower() == needle for match in matches)
+
 def _find_grz_matches(company: str, options_by_company: dict[str, list[str]], prefix: str) -> list[str]:
     token = prefix.lower().strip()
     if not token:
@@ -715,19 +720,31 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 return True
 
             grz_task = text.strip().upper()
-            if not _is_plate_format(grz_task):
-                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
-                return True
             matches = _find_grz_matches(
                 str(flow.data.get("company") or ""),
                 flow.data.get("parking_task_grz_by_company") or {},
                 grz_task,
             )
             flow.data["grz_task"] = grz_task
+
+            if matches and not _is_exact_grz_match(grz_task, matches):
+                await _ask(
+                    flow,
+                    chat_id,
+                    "Подходящие варианты ГРЗ (продолжайте ввод или выберите из списка):",
+                    matches[:20],
+                )
+                return True
+
             if matches:
                 flow.step = "grz_task_confirm"
                 await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                 return True
+
+            if not _is_plate_format(grz_task):
+                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                return True
+
             flow.step = "summa"
             await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
             await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
