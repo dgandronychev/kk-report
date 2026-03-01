@@ -34,6 +34,8 @@ from app.handlers.finance import (
     cmd_parking,
     cmd_zapravka,
     cmd_expense,
+    warmup_finance_refs,
+    refresh_finance_refs,
     try_handle_finance_step,
     reset_finance_progress,
 )
@@ -63,6 +65,7 @@ async def _refresh_reference_caches(chat_id: int) -> None:
             refresh_sborka_refs(),
             refresh_soberi_refs(),
             refresh_nomenclature_refs(),
+            refresh_finance_refs(),
         )
     except Exception:
         logging.exception("failed to refresh reference caches")
@@ -335,6 +338,7 @@ async def _warmup_caches() -> None:
             warmup_sborka_refs(),
             warmup_soberi_refs(),
             warmup_nomenclature_refs(),
+            warmup_finance_refs(),
         )
         logging.info("reference caches warmed up")
     except Exception:

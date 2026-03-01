@@ -58,6 +58,38 @@ _KEY_PAYMENT = ["Бизнес-карта", "Наличные <> Перевод <
 _KEY_PAYMENT_EXTRA = ["Подача на возмещение(свои деньги) + 6%"]
 _FINANCE_STUB_USER_IDS = {199909595}
 
+
+_finance_refs: dict[str, object] = {
+    "parking_grz_options": [],
+    "parking_task_grz_by_company": {},
+}
+
+
+async def _ensure_finance_refs_loaded() -> None:
+    if _finance_refs.get("parking_grz_options") and _finance_refs.get("parking_task_grz_by_company"):
+        return
+    await refresh_finance_refs()
+
+
+async def warmup_finance_refs() -> None:
+    await _ensure_finance_refs_loaded()
+
+
+async def refresh_finance_refs() -> None:
+    parking_grz_options: list[str] = []
+    parking_task_grz_by_company: dict[str, list[str]] = {}
+    try:
+        parking_grz_options = await asyncio.to_thread(load_tech_plates)
+    except Exception:
+        logger.exception("failed to load tech plates from google sheets")
+    try:
+        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
+    except Exception:
+        logger.exception("failed to load parking task grz by company from google sheets")
+
+    _finance_refs["parking_grz_options"] = parking_grz_options
+    _finance_refs["parking_task_grz_by_company"] = parking_task_grz_by_company
+
 def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
     if include_back:
         return ["Назад", "Выход"], ["fin_back", "fin_exit"]
@@ -88,6 +120,24 @@ async def _send_plain(flow: FinanceFlow, chat_id: int, text: str) -> None:
         await delete_message(chat_id, prev_msg_id)
 
     response = await send_message(chat_id=chat_id, text=text)
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
+async def _send_plain_with_controls(flow: FinanceFlow, chat_id: int, text: str, include_back: bool = True) -> None:
+    controls, payloads = _kb_control(include_back=include_back)
+
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=text,
+        button_texts=controls,
+        button_payloads=payloads,
+    )
     msg_id = extract_message_id(response)
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
@@ -203,24 +253,15 @@ async def cmd_parking(st: FinanceState, user_id: int, chat_id: int, username: st
         await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
         return
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    parking_grz_options: list[str] = []
-    parking_task_grz_by_company: dict[str, list[str]] = {}
-    try:
-        parking_grz_options = await asyncio.to_thread(load_tech_plates)
-    except Exception:
-        logger.exception("failed to load tech plates from google sheets")
-    try:
-        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
-    except Exception:
-        logger.exception("failed to load parking task grz by company from google sheets")
+    await _ensure_finance_refs_loaded()
     st.flows_by_user[user_id] = FinanceFlow(
         kind="parking",
         step="grz_tech",
         data={
             "username": username,
             "fio": fio,
-            "parking_grz_options": parking_grz_options,
-            "parking_task_grz_by_company": parking_task_grz_by_company,
+            "parking_grz_options": list(_finance_refs.get("parking_grz_options") or []),
+            "parking_task_grz_by_company": dict(_finance_refs.get("parking_task_grz_by_company") or {}),
         },
     )
     await _ask_parking_grz(st.flows_by_user[user_id], chat_id)
@@ -241,16 +282,7 @@ async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, u
 
     fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
     tasks = await get_open_tasks_async(max_chat_id=chat_id)
-    parking_grz_options: list[str] = []
-    parking_task_grz_by_company: dict[str, list[str]] = {}
-    try:
-        parking_grz_options = await asyncio.to_thread(load_tech_plates)
-    except Exception:
-        logger.exception("failed to load tech plates from google sheets")
-    try:
-        parking_task_grz_by_company = await asyncio.to_thread(load_parking_task_grz_by_company)
-    except Exception:
-        logger.exception("failed to load parking task grz by company from google sheets")
+    await _ensure_finance_refs_loaded()
     if not tasks and user_id in _FINANCE_STUB_USER_IDS:
         tasks = [
             {
@@ -278,8 +310,8 @@ async def _start_task_based_flow(st: FinanceState, user_id: int, chat_id: int, u
             "username": username,
             "fio": fio,
             "tasks": tasks,
-            "parking_grz_options": parking_grz_options,
-            "parking_task_grz_by_company": parking_task_grz_by_company,
+            "parking_grz_options": list(_finance_refs.get("parking_grz_options") or []),
+            "parking_task_grz_by_company": dict(_finance_refs.get("parking_task_grz_by_company") or {}),
         },
     )
     st.flows_by_user[user_id] = flow
@@ -517,7 +549,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "grz_tech":
             flow.data["grz_tech"] = text.strip().upper()
             flow.step = "company"
-            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
         if flow.step == "company":
             if ctrl == "back":
@@ -525,16 +557,16 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 await _ask_parking_grz(flow, chat_id)
                 return True
             if text.strip() not in _KEY_COMPANY:
-                await _ask(flow, chat_id, "Выберите компанию из списка:", _KEY_COMPANY, include_back=False)
+                await _ask(flow, chat_id, "Выберите компанию из списка:", _KEY_COMPANY)
                 return True
             flow.data["company"] = text.strip()
             flow.step = "grz_task"
-            await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+            await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
             return True
         if flow.step == "grz_task":
             if ctrl == "back":
                 flow.step = "company"
-                await _ask(flow, chat_id, "Компания:", _KEY_COMPANY, include_back=False)
+                await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
                 return True
             grz_task = text.strip().upper()
             matches = _find_grz_matches(
@@ -556,7 +588,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "grz_task_confirm":
             if ctrl == "back":
                 flow.step = "grz_task"
-                await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
             flow.data["grz_task"] = text.strip().upper()
             flow.step = "files"
@@ -574,7 +606,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                     await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                     return True
                 flow.step = "grz_task"
-                await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
             if ctrl == "done":
                 if len(flow.files) < 1:
@@ -607,7 +639,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 await send_text(chat_id, "Введите значение в формате 101.11 или 101,11")
                 return True
             flow.step = "summa"
-            await _send_plain(flow, chat_id, "Укажите сумму заправки:")
+            await _send_plain_with_controls(flow, chat_id, "Укажите сумму заправки:")
             return True
         if flow.step == "summa":
             if ctrl == "back":
@@ -625,7 +657,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "files":
             if ctrl == "back":
                 flow.step = "summa"
-                await _send_plain(flow, chat_id, "Укажите сумму заправки:")
+                await _send_plain_with_controls(flow, chat_id, "Укажите сумму заправки:")
                 return True
             if ctrl == "done":
                 if len(flow.files) < 3:
@@ -654,7 +686,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 return True
             flow.data["city"] = text.strip()
             flow.step = "grz_task"
-            await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+            await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
             return True
         if flow.step == "grz_task":
             if ctrl == "back":
@@ -675,16 +707,16 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 return True
             flow.step = "summa"
             await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
-            await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+            await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
         if flow.step == "grz_task_confirm":
             if ctrl == "back":
                 flow.step = "grz_task"
-                await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
             flow.data["grz_task"] = text.strip().upper()
             flow.step = "summa"
-            await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+            await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
         if flow.step == "summa":
             if ctrl == "back":
@@ -698,7 +730,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                     await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                     return True
                 flow.step = "grz_task"
-                await _send_plain(flow, chat_id, "Начните ввод ГРЗ задачи:")
+                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
             try:
                 flow.data["summa"] = float(text.strip().replace(",", "."))
@@ -711,7 +743,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
         if flow.step == "payment":
             if ctrl == "back":
                 flow.step = "summa"
-                await _send_plain(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
+                await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
                 return True
             if text.strip() not in _KEY_PAYMENT:
                 await _ask(flow, chat_id, "Выберите способ оплаты из списка:", _KEY_PAYMENT)
