@@ -23,6 +23,8 @@ from app.config import (
     TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_CITY,
     TELEGRAM_THREAD_ID_FINANCE_ZAPRAVKA_YANDEX,
     TELEGRAM_BOT_TOKEN_TECHNIK,
+    GSPREAD_URL_INFO_RASXOD_SHM,
+    GSPREAD_URL_INFO_RASXOD,
 )
 from app.utils.gsheets import load_parking_task_grz_by_company, load_tech_plates, write_in_answers_ras
 from app.utils.helper import get_fio_async, get_open_tasks_async
@@ -400,26 +402,27 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
 def _render_report(flow: FinanceFlow) -> str:
     data = flow.data
     base = "⌚️ " + (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S") + "\n\n"
-    base += f"👷 @{data.get('username', '—')}\n{data.get('fio', '—')}\n\n"
+    base += f"👷 {data.get('fio', '—')}\n\n"
 
     if flow.kind == "parking":
         return (
             base
-            + f"#{data.get('grz_tech', '—')}\n"
-            + f"{data.get('company', '—')}\n\n"
-            + f"{data.get('grz_task', '—')}\n"
+            + f"ГРЗ технички: #{data.get('grz_tech', '—')}\n"
+            + f"Компания:  {data.get('company', '—')}\n\n"
+            + f"ГРЗ задачи: {data.get('grz_task', '—')}\n"
             + "#Парковка"
         )
 
     if flow.kind == "zapravka":
         return (
             base
-            + f"#{data.get('grz_tech', '—')}\n"
-            + f"{data.get('company', '—')}\n\n"
-            + f"{data.get('odometer', '—')}\n"
-            + f"{data.get('summa', '—')}\n"
+            + f"ГРЗ технички: #{data.get('grz_tech', '—')}\n"
+            + f"Компания: {data.get('company', '—')}\n\n"
+            + f"Одометр: {data.get('odometer', '—')}\n"
+            + f"Сумма:  {data.get('summa', '—')}\n"
             + "#Заправка"
         )
+
 
     add_sum = ""
     if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
@@ -430,18 +433,18 @@ def _render_report(flow: FinanceFlow) -> str:
 
     report = (
         base
-        + f"{data.get('city', '—')}\n"
-        + "ШМ\n"
-        + f"{data.get('summa', '—')}\n"
+        + f"Город: {data.get('city', '—')}\n"
+        + "Направление: ШМ\n"
+        + f"Сумма: {data.get('summa', '—')}\n"
     )
     if add_sum:
-        report += f"{add_sum}\n\n"
+        report += f"Сумма +6%: {add_sum}\n\n"
     report += (
-        f"{data.get('company', '—')}\n"
-        + f"{data.get('payment', '—')}\n"
-        + f"{data.get('reason', '—')}\n\n"
-        + f"#{data.get('grz_tech', '—')}\n"
-        + f"{data.get('grz_task', '—')}"
+        f"Компания: {data.get('company', '—')}\n"
+        + f"Вид оплаты: {data.get('payment', '—')}\n"
+        + f"Причина: {data.get('reason', '—')}\n\n"
+        + f"ГРЗ технички: #{data.get('grz_tech', '—')}\n"
+        + f"ГРЗ задачи: {data.get('grz_task', '—')}"
     )
     if data.get("payment_extra") == "Подача на возмещение(свои деньги) + 6%":
         report += "\n\n@Anastasiya_CleanCar, cогласуйте, пожалуйста"
@@ -455,15 +458,15 @@ def _write_sheet(flow: FinanceFlow, report_link: str) -> None:
     if flow.kind == "parking":
         row = [
             now,
-            data.get("fio", ""),
-            data.get("username", ""),
-            data.get("company", ""),
             data.get("grz_tech", ""),
+            data.get("company", ""),
             data.get("grz_task", ""),
+            "",
+            data.get("fio", ""),
             report_link,
         ]
         logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Городская парковка", row)
-        write_in_answers_ras(row, "Городская парковка")
+        write_in_answers_ras(row, "Городская парковка", GSPREAD_URL_INFO_RASXOD_SHM)
         return
 
     if flow.kind == "zapravka":
@@ -473,12 +476,12 @@ def _write_sheet(flow: FinanceFlow, report_link: str) -> None:
             data.get("company", ""),
             data.get("odometer", ""),
             data.get("summa", ""),
-            data.get("username", ""),
+            "",
             data.get("fio", ""),
             report_link,
         ]
         logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Заправка техничек", row)
-        write_in_answers_ras(row, "Заправка техничек")
+        write_in_answers_ras(row, "Заправка техничек", GSPREAD_URL_INFO_RASXOD_SHM)
         return
 
     add_sum = ""
@@ -491,7 +494,7 @@ def _write_sheet(flow: FinanceFlow, report_link: str) -> None:
     row = [
         now,
         data.get("fio", ""),
-        data.get("username", ""),
+        "",
         data.get("city", ""),
         data.get("summa", ""),
         add_sum,
@@ -504,7 +507,7 @@ def _write_sheet(flow: FinanceFlow, report_link: str) -> None:
         data.get("grz_task", ""),
     ]
     logger.info("[FINANCE->GSHEETS] sheet=%s row=%s", "Лист1", row)
-    write_in_answers_ras(row, "Лист1")
+    write_in_answers_ras(row, "Лист1", GSPREAD_URL_INFO_RASXOD)
 
 
 async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
