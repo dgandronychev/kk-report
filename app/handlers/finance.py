@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
 import asyncio
+import re
 from typing import Dict, List, Optional, Set
 
 from app.config import (
@@ -147,6 +148,11 @@ async def _send_plain_with_controls(flow: FinanceFlow, chat_id: int, text: str, 
 
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
+
+
+def _is_plate_format(value: str) -> bool:
+    cleaned = re.sub(r"\s+", "", str(value).upper())
+    return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
 
 def _find_grz_matches(company: str, options_by_company: dict[str, list[str]], prefix: str) -> list[str]:
     token = prefix.lower().strip()
@@ -368,7 +374,7 @@ async def _finish_flow(st: FinanceState, user_id: int, chat_id: int, flow: Finan
     out_chat = _company_chat_id(company)
     max_link = ""
     try:
-        response = await send_text(out_chat, report)
+        response = await send_message(chat_id=out_chat, text=report, attachments=flow.files)
         message_id = extract_message_id(response)
         if message_id:
             max_link = f"max://chat/{out_chat}/message/{message_id}"
@@ -550,7 +556,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
 
     if flow.kind == "parking":
         if flow.step == "grz_tech":
-            flow.data["grz_tech"] = text.strip().upper()
+            grz_tech = text.strip().upper()
+            if not _is_plate_format(grz_tech):
+                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
+                return True
+            flow.data["grz_tech"] = grz_tech
             flow.step = "company"
             await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
@@ -572,6 +582,9 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
                 return True
             grz_task = text.strip().upper()
+            if not _is_plate_format(grz_task):
+                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
+                return True
             matches = _find_grz_matches(
                 str(flow.data.get("company") or ""),
                 flow.data.get("parking_task_grz_by_company") or {},
@@ -593,7 +606,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "grz_task"
                 await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
-            flow.data["grz_task"] = text.strip().upper()
+            grz_task = text.strip().upper()
+            if not _is_plate_format(grz_task):
+                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
+                return True
+            flow.data["grz_task"] = grz_task
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
             return True
@@ -698,6 +715,9 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 return True
 
             grz_task = text.strip().upper()
+            if not _is_plate_format(grz_task):
+                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
+                return True
             matches = _find_grz_matches(
                 str(flow.data.get("company") or ""),
                 flow.data.get("parking_task_grz_by_company") or {},
@@ -717,7 +737,11 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "grz_task"
                 await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
-            flow.data["grz_task"] = text.strip().upper()
+            grz_task = text.strip().upper()
+            if not _is_plate_format(grz_task):
+                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
+                return True
+            flow.data["grz_task"] = grz_task
             flow.step = "summa"
             await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True

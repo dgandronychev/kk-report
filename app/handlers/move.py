@@ -396,7 +396,7 @@ async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow
     text = _render_report(flow)
     max_link = ""
     try:
-        response = await send_text(out_chat, text)
+        response = await send_message(chat_id=out_chat, text=text, attachments=flow.files)
         message_id = extract_message_id(response)
         if message_id:
             max_link = f"max://chat/{out_chat}/message/{message_id}"
