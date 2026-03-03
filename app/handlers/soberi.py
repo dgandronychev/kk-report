@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import IntEnum
+import asyncio
 import logging
 import re
 from typing import Dict, List
 from app.utils.helper import get_fio_async
+from app.utils.scheduler import send_wheels_summary_once
 
 from app.utils.max_api import delete_message, extract_message_id, send_message, send_text, send_text_with_reply_buttons
 from app.utils.gsheets import (
@@ -44,6 +46,7 @@ _KEY_OBJECT = ["Комплект", "Ось", "Колесо"]
 _KEY_COMPANY = ["СитиДрайв", "Яндекс"]
 _KEY_TYPE_DISK = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
 _KEY_CHISLA = ["0", "1", "2", "3", "4", "5"]
+_KEY_COMMENT = ["Пропустить"]
 _MARKA_TS_PAGE_SIZE = 15
 
 _ref_data: dict | None = None
@@ -237,6 +240,7 @@ def _next_rows(data: dict) -> list[list[str]]:
             "",
             f"sb{num}",
             data.get("fio", ""),
+            data.get("comment", ""),
         ]
 
     type_soberi = data.get("type_soberi")
@@ -274,7 +278,16 @@ async def _finalize(st: SoberiState, user_id: int, chat_id: int) -> bool:
     write_soberi_in_google_sheets_rows(rows)
     _clear(st, user_id)
     await _send_flow_text(flow, chat_id, "Заявка на сборку оформлена")
+    try:
+        await asyncio.to_thread(send_wheels_summary_once)
+    except Exception:
+        logger.exception("failed to send wheels summary after soberi finalize")
     return True
+
+
+async def _ask_comment(flow: SoberiFlow, chat_id: int) -> None:
+    flow.step = "comment"
+    await _ask(flow, chat_id, "Комментарий (можно пропустить):", _KEY_COMMENT)
 
 
 async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
@@ -354,6 +367,14 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
         elif step == "count_2":
             flow.step = "count_1"
             await _ask(flow, chat_id, "Уточните количество левых колес:", _KEY_CHISLA)
+        elif step == "comment":
+            if data.get("type_soberi") in {"Комплект", "Ось"}:
+                flow.step = "count_1"
+                label = "Количество комплектов:" if data.get("type_soberi") == "Комплект" else "Количество осей:"
+                await _ask(flow, chat_id, label, _KEY_CHISLA)
+            else:
+                flow.step = "count_2"
+                await _ask(flow, chat_id, "Уточните количество правых колес:", _KEY_CHISLA)
         return True
 
     if flow.step == "marka_ts" and controls & {"soberi_page_prev", "soberi_page_next"}:
@@ -474,7 +495,8 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
             return True
         data["count_1"] = int(t)
         if data.get("type_soberi") in {"Комплект", "Ось"}:
-            return await _finalize(st, user_id, chat_id)
+            await _ask_comment(flow, chat_id)
+            return True
         flow.step = "count_2"
         await _ask(flow, chat_id, "Уточните количество правых колес:", _KEY_CHISLA)
         return True
@@ -484,6 +506,14 @@ async def try_handle_soberi_step(st: SoberiState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Уточните количество правых колес:", _KEY_CHISLA)
             return True
         data["count_2"] = int(t)
+        await _ask_comment(flow, chat_id)
+        return True
+
+    if step == "comment":
+        if _normalize(t) == "пропустить":
+            data["comment"] = ""
+        else:
+            data["comment"] = t
         return await _finalize(st, user_id, chat_id)
 
     return True

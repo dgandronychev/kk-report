@@ -61,7 +61,7 @@ class DamageState:
     pending_transfers: Dict[int, dict] = field(default_factory=dict)
 
 _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
-_KEY_TYPE = ["В сборе", "Только резина"]
+_KEY_TYPE = ["В сборе", "Только резина", "Диск"]
 _KEY_TYPE_DISK = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
 _KEY_CONDITION = ["Ок", "Ремонт", "Утиль"]
 _KEY_REASON_TIRE_UTIL = ["Езда на спущенном", "Износ протектора", "Боковой пробой", "Грыжа"]
@@ -264,16 +264,20 @@ def _render_report(data: dict, fio: str) -> str:
         report += f"👷 {fio}\n"
     report += "\n"
     report += f"🛞 {data['vid_kolesa']}\n"
-    report += f"{data['marka_rez']} {data['model_rez']}\n"
-    report += f"{data['razmer']}/{data['radius']}\n"
-
-    season = str(data.get("sezon", ""))
-    if season.startswith("Лето"):
-        report += f"☀️ {season}\n"
-    elif season.startswith("Зима"):
-        report += f"❄️ {season}\n"
+    if data.get("vid_kolesa") == "Диск":
+        if data.get("radius"):
+            report += f"R{data['radius']}\n"
     else:
-        report += f"{season}\n"
+        report += f"{data['marka_rez']} {data['model_rez']}\n"
+        report += f"{data['razmer']}/{data['radius']}\n"
+
+        season = str(data.get("sezon", ""))
+        if season.startswith("Лето"):
+            report += f"☀️ {season}\n"
+        elif season.startswith("Зима"):
+            report += f"❄️ {season}\n"
+        else:
+            report += f"{season}\n"
 
     if data.get("type_disk"):
         report += f"{data['type_disk']}\n\n"
@@ -284,11 +288,12 @@ def _render_report(data: dict, fio: str) -> str:
     if data.get("por_nomer_diska"):
         report += f"#{data['por_nomer_diska'].replace(' ', '_')}\n"
 
-    report += f"\n🛞 Состояние резины:\n#{data.get('sost_rez', '').replace(' ', '_')}\n"
-    if data.get("sost_rez_prich"):
-        report += f"#{data['sost_rez_prich'].replace(' ', '_')}\n"
-    if data.get("por_nomer_rezina"):
-        report += f"#{data['por_nomer_rezina'].replace(' ', '_')}\n"
+    if data.get("vid_kolesa") != "Диск":
+        report += f"\n🛞 Состояние резины:\n#{data.get('sost_rez', '').replace(' ', '_')}\n"
+        if data.get("sost_rez_prich"):
+            report += f"#{data['sost_rez_prich'].replace(' ', '_')}\n"
+        if data.get("por_nomer_rezina"):
+            report += f"#{data['por_nomer_rezina'].replace(' ', '_')}\n"
 
     report += f"#{data['company']}"
     return report
@@ -347,6 +352,9 @@ def _build_sborka_transfer(data: dict) -> dict | None:
         "type_sborka": "sborka",
     }
 
+    if data.get("vid_kolesa") == "Диск":
+        return None
+
     if data.get("sost_disk") == "Ок" and data.get("sost_rez") == "Утиль":
         return {
             "mode": "replace_tire_confirm",
@@ -387,7 +395,7 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
         else:
             data["por_nomer_diska"] = ""
 
-        if data.get("sost_rez") == "Утиль":
+        if data.get("vid_kolesa") != "Диск" and data.get("sost_rez") == "Утиль":
             data["por_nomer_rezina"] = get_number_util(data.get("company", ""), POR_NOMER_REZ)
         else:
             data["por_nomer_rezina"] = ""
@@ -430,20 +438,20 @@ async def _finalize(st: DamageState, user_id: int, chat_id: int, msg: dict) -> b
 
     row = [
         (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
-        data["company"],
-        data["vid_kolesa"],
+        data.get("company", ""),
+        data.get("vid_kolesa", ""),
         data.get("grz", ""),
         data.get("marka_ts", ""),
-        data["radius"],
-        data["razmer"],
-        data["marka_rez"],
-        data["model_rez"],
-        data["sezon"],
-        data["type_disk"],
-        data["sost_disk"],
+        data.get("radius", ""),
+        data.get("razmer", ""),
+        data.get("marka_rez", ""),
+        data.get("model_rez", ""),
+        data.get("sezon", ""),
+        data.get("type_disk", ""),
+        data.get("sost_disk", ""),
         data.get("sost_disk_prich", ""),
         data.get("por_nomer_diska", ""),
-        data["sost_rez"],
+        data.get("sost_rez", ""),
         data.get("sost_rez_prich", ""),
         data.get("por_nomer_rezina", ""),
         telegram_link or msg_ref,
@@ -497,6 +505,10 @@ async def _handle_back(flow: DamageFlow, chat_id: int) -> bool:
             marka = _find_car_mark(company, flow.data.get("grz", ""))
             await _ask_marka_ts(flow, chat_id, marka)
             return True
+        if flow.data.get("vid_kolesa") == "Диск":
+            flow.step = "marka_ts"
+            await _send_flow_text(flow, chat_id, "Введите марку/модель автомобиля:")
+            return True
         flow.step = "wheel_type"
         await _ask(flow, chat_id, "Вид колеса:", _KEY_TYPE)
         return True
@@ -527,6 +539,10 @@ async def _handle_back(flow: DamageFlow, chat_id: int) -> bool:
         return True
 
     if step == "type_disk":
+        if flow.data.get("vid_kolesa") == "Диск":
+            flow.step = "radius"
+            await _ask(flow, chat_id, "Радиус:", _list_radius(company))
+            return True
         flow.step = "sezon"
         await _ask(flow, chat_id, "Сезонность:",
                    _filter_values(company, radius=flow.data.get("radius", ""), razmer=flow.data.get("razmer", ""),
@@ -608,6 +624,9 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
         if t == "В сборе":
             flow.step = "grz"
             await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
+        elif t == "Диск":
+            flow.step = "grz"
+            await _send_flow_text(flow, chat_id, "Начните ввод госномера задачи:")
         else:
             flow.step = "radius"
             await _ask(flow, chat_id, "Радиус:", _list_radius(flow.data["company"]))
@@ -654,6 +673,10 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
             await _ask(flow, chat_id, "Введенного радиуса нет в базе. Выберите из списка:", options)
             return True
         flow.data["radius"] = t
+        if flow.data.get("vid_kolesa") == "Диск":
+            flow.step = "type_disk"
+            await _ask(flow, chat_id, "Тип диска:", _KEY_TYPE_DISK)
+            return True
         flow.step = "razmer"
         await _ask(flow, chat_id, "Размер:", _filter_values(flow.data["company"], radius=t, field=GHRezina.RAZMER))
         return True
@@ -718,6 +741,12 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
         flow.data["sost_disk"] = t
         if t == "Ок":
             flow.data["sost_disk_prich"] = ""
+            if flow.data.get("vid_kolesa") == "Диск":
+                flow.data["sost_rez"] = ""
+                flow.data["sost_rez_prich"] = ""
+                flow.step = "files"
+                await send_files_prompt(flow, chat_id, "Прикрепите файлы и нажмите «Готово»")
+                return True
             flow.step = "sost_rez"
             await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
             return True
@@ -727,6 +756,12 @@ async def try_handle_damage_step(st: DamageState, user_id: int, chat_id: int, te
 
     if step == "sost_disk_prich":
         flow.data["sost_disk_prich"] = t
+        if flow.data.get("vid_kolesa") == "Диск":
+            flow.data["sost_rez"] = ""
+            flow.data["sost_rez_prich"] = ""
+            flow.step = "files"
+            await send_files_prompt(flow, chat_id, "Прикрепите файлы и нажмите «Готово»")
+            return True
         flow.step = "sost_rez"
         await _ask(flow, chat_id, "Состояние резины:", _KEY_CONDITION)
         return True
