@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import logging
 import asyncio
-import re
 from typing import Dict, List, Optional, Set
 
 from app.config import (
@@ -148,12 +147,6 @@ async def _send_plain_with_controls(flow: FinanceFlow, chat_id: int, text: str, 
 
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
-
-
-def _is_plate_format(value: str) -> bool:
-    cleaned = re.sub(r"\s+", "", str(value).upper())
-    return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
-
 
 def _is_exact_grz_match(value: str, matches: list[str]) -> bool:
     needle = value.strip().lower()
@@ -561,11 +554,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
 
     if flow.kind == "parking":
         if flow.step == "grz_tech":
-            grz_tech = text.strip().upper()
-            if not _is_plate_format(grz_tech):
-                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
-                return True
-            flow.data["grz_tech"] = grz_tech
+            flow.data["grz_tech"] = text.strip().upper()
             flow.step = "company"
             await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
@@ -587,9 +576,6 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
                 return True
             grz_task = text.strip().upper()
-            if not _is_plate_format(grz_task):
-                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
-                return True
             matches = _find_grz_matches(
                 str(flow.data.get("company") or ""),
                 flow.data.get("parking_task_grz_by_company") or {},
@@ -611,11 +597,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "grz_task"
                 await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
-            grz_task = text.strip().upper()
-            if not _is_plate_format(grz_task):
-                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
-                return True
-            flow.data["grz_task"] = grz_task
+            flow.data["grz_task"] = text.strip().upper()
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Добавьте скриншот из приложения парковок (от 1 до 2 файлов)")
             return True
@@ -740,11 +722,6 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "grz_task_confirm"
                 await _ask(flow, chat_id, "Подтвердите ГРЗ из списка или отправьте свой:", matches[:20])
                 return True
-
-            if not _is_plate_format(grz_task):
-                await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
-                return True
-
             flow.step = "summa"
             await _send_plain(flow, chat_id, "Номер не найден в базе, ввод продолжен вручную")
             await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
@@ -754,11 +731,7 @@ async def try_handle_finance_step(st: FinanceState, user_id: int, chat_id: int, 
                 flow.step = "grz_task"
                 await _send_plain_with_controls(flow, chat_id, "Начните ввод ГРЗ задачи:")
                 return True
-            grz_task = text.strip().upper()
-            if not _is_plate_format(grz_task):
-                await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
-                return True
-            flow.data["grz_task"] = grz_task
+            flow.data["grz_task"] = text.strip().upper()
             flow.step = "summa"
             await _send_plain_with_controls(flow, chat_id, "Введите сумму с 2 знаками после точки, пример: 5678.91")
             return True
