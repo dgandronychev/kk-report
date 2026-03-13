@@ -330,6 +330,10 @@ def _build_sheet_rows(flow: MoveFlow, message_ref: str) -> list[list[str]]:
             ])
     return rows
 
+
+def _is_pickup_from_stock(flow: MoveFlow) -> bool:
+    return str(flow.data.get("action") or "") == "Забираете со склада"
+
 async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     if chat_id < 0:
         await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
@@ -512,6 +516,10 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             return True
         flow.data["company"] = text.strip()
         flow.data["item_draft"] = MoveItem()
+        if _is_pickup_from_stock(flow):
+            flow.step = "item_wheel_type"
+            await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+            return True
         flow.step = "item_marka_ts"
         await _send_plain(flow, chat_id, "Марка автомобиля:")
         return True
@@ -520,13 +528,31 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "item_marka_ts":
         if ctrl == "back":
-            flow.step = "company"
-            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            if _is_pickup_from_stock(flow):
+                flow.step = "item_wheel_type"
+                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+            else:
+                flow.step = "company"
+                await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
         draft.marka_ts = text.strip()
         flow.data["item_draft"] = draft
         flow.step = "item_radius"
         await _send_plain(flow, chat_id, "Радиус (пример R17):")
+        return True
+
+    if flow.step == "item_wheel_type":
+        if ctrl == "back":
+            flow.step = "company"
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            return True
+        if text.strip() not in _KEY_WHEEL_TYPE:
+            await _ask(flow, chat_id, "Выберите тип позиции из списка:", _KEY_WHEEL_TYPE)
+            return True
+        draft.wheel_type = text.strip()
+        flow.data["item_draft"] = draft
+        flow.step = "item_marka_ts"
+        await _send_plain(flow, chat_id, "Марка автомобиля:")
         return True
 
     if flow.step == "item_radius":
@@ -561,14 +587,12 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "item_tip_diska":
         draft.tip_diska = text.strip()
+        if draft.wheel_type:
+            flow.step = "item_count_left"
+            await _send_plain(flow, chat_id, "Сколько левых колес:")
+            return True
         flow.step = "item_wheel_type"
         await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
-        return True
-
-    if flow.step == "item_wheel_type":
-        draft.wheel_type = text.strip()
-        flow.step = "item_count_left"
-        await _send_plain(flow, chat_id, "Сколько левых колес:")
         return True
 
     if flow.step == "item_count_left":
@@ -595,8 +619,13 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "items_review":
         if ctrl == "add":
-            flow.step = "item_marka_ts"
-            await _send_plain(flow, chat_id, "Марка автомобиля:")
+            flow.data["item_draft"] = MoveItem()
+            if _is_pickup_from_stock(flow):
+                flow.step = "item_wheel_type"
+                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+            else:
+                flow.step = "item_marka_ts"
+                await _send_plain(flow, chat_id, "Марка автомобиля:")
             return True
         if ctrl == "done":
             if not flow.items:
@@ -608,8 +637,13 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         if ctrl == "back":
             if flow.items:
                 flow.items.pop()
-            flow.step = "item_marka_ts"
-            await _send_plain(flow, chat_id, "Марка автомобиля:")
+            flow.data["item_draft"] = MoveItem()
+            if _is_pickup_from_stock(flow):
+                flow.step = "item_wheel_type"
+                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+            else:
+                flow.step = "item_marka_ts"
+                await _send_plain(flow, chat_id, "Марка автомобиля:")
             return True
         await _send_items_prompt(flow, chat_id)
         return True
