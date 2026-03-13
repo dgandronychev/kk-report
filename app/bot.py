@@ -58,19 +58,20 @@ from app.handlers.move import (
 logger = logging.getLogger(__name__)
 
 MENU_COMMANDS: list[tuple[str, str]] = [
-    ("Регистрация", "/registration"),
-    ("Начало смены", "/start_job_shift"),
-    ("Конец смены", "/end_work_shift"),
-    ("Брак", "/damage"),
+    ("Повреждение", "/damage"),
     ("Сборка", "/sborka"),
-    ("Собери", "/soberi"),
+    ("Перемещение", "/move"),
+    ("Заявка на сборку", "/soberi"),
+    ("Заявка на сборку", "/soberi_belka"),
     ("Номенклатура", "/nomenclature"),
     ("Открыть ворота", "/open_gate"),
     ("Парковка", "/parking"),
     ("Заправка", "/zapravka"),
     ("Расход", "/expense"),
     ("Отчет по расходу", "/report_expense"),
-    ("Перемещение", "/move"),
+    ("Начало смены", "/start_job_shift"),
+    ("Конец смены", "/end_work_shift"),
+    ("Регистрация", "/registration"),
     ("Обновить данные", "/update_data"),
 ]
 
