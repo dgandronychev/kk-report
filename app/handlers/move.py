@@ -76,6 +76,9 @@ def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
 
 
+_ACTION_BY_NORMALIZED = {_normalize(action): action for action in _KEY_ACTION}
+
+
 def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
     if include_back:
         return ["Назад", "Выход"], ["move_back", "move_exit"]
@@ -332,7 +335,8 @@ def _build_sheet_rows(flow: MoveFlow, message_ref: str) -> list[list[str]]:
 
 
 def _is_pickup_from_stock(flow: MoveFlow) -> bool:
-    return str(flow.data.get("action") or "") == "Забираете со склада"
+    action = str(flow.data.get("action") or "")
+    return _normalize(action) == _normalize("Забираете со склада")
 
 async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     if chat_id < 0:
@@ -479,10 +483,12 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         return True
 
     if flow.step == "action":
-        if text.strip() not in _KEY_ACTION:
+        normalized_action = _normalize(text)
+        action = _ACTION_BY_NORMALIZED.get(normalized_action)
+        if not action:
             await _ask(flow, chat_id, "Выберите действие из списка:", _KEY_ACTION, include_back=False)
             return True
-        flow.data["action"] = text.strip()
+        flow.data["action"] = action
         if flow.data["action"] == "Передаете в техничку":
             flow.step = "grz_peredacha"
             await _ask_tech_grz(flow, chat_id, "Кому передаете (ГРЗ технички, можно ввести вручную):")
