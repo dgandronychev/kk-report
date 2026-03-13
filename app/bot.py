@@ -15,7 +15,7 @@ from app.utils.scheduler import start_schedulers
 from app.utils.hub_report import bootstrap_hub_report_state, schedule_hub_report_updates, refresh_hub_reports
 from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN, UPDATE_DATA_ALLOWED_USER_IDS
 from app.utils.http import run_http
-from app.utils.max_api import get_updates, send_text, send_text_with_reply_buttons
+from app.utils.max_api import delete_message, extract_message_id, get_updates, send_text, send_text_with_reply_buttons
 from app.utils.chat_memory import remember_chat_id
 from app.handlers.registration import (
     RegistrationState,
@@ -77,14 +77,21 @@ MENU_COMMANDS: list[tuple[str, str]] = [
 
 
 async def _send_menu_commands(chat_id: int) -> None:
+    prev_msg_id = _menu_prompt_message_ids.pop(chat_id, None)
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
     labels = [label for label, _ in MENU_COMMANDS]
     payloads = [command for _, command in MENU_COMMANDS]
-    await send_text_with_reply_buttons(
+    response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text="Выберите команду:",
         button_texts=labels,
         button_payloads=payloads,
     )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        _menu_prompt_message_ids[chat_id] = msg_id
 
 async def _refresh_reference_caches(chat_id: int) -> None:
     await send_text(chat_id, "Обновление списков началось")
@@ -113,6 +120,7 @@ _open_gate = OpenGateState()
 _finance = FinanceState()
 _report_expense = ReportExpenseState()
 _move = MoveState()
+_menu_prompt_message_ids: dict[int, str] = {}
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -389,6 +397,7 @@ def _reset_user_progress(user_id: int, chat_id: int) -> None:
 # ===== Routing =====
 async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
     t = text.strip()
+    menu_prompt_msg_id = _menu_prompt_message_ids.get(chat_id)
 
     # Кнопки в MAX могут присылать либо slash-команды, либо человекочитаемый текст.
     aliases = {
@@ -443,6 +452,9 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
             is_command = True
 
     if is_command:
+        if menu_prompt_msg_id:
+            await delete_message(chat_id, menu_prompt_msg_id)
+            _menu_prompt_message_ids.pop(chat_id, None)
         _reset_user_progress(user_id, chat_id)
 
     # 1) Сначала — шаги (stateful). Если ждём телефон — обработаем тут.
@@ -583,7 +595,7 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     # 3) Default
-    await send_text(chat_id, "Команда не распознана. Введите /menu, чтобы открыть список команд.")
+    await send_text(chat_id, "Команда не распознана. Введите /menu, чтобы открыть список команд")
 
 async def _polling_loop() -> None:
     marker: Optional[int] = None
