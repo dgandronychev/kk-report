@@ -15,7 +15,7 @@ from app.utils.scheduler import start_schedulers
 from app.utils.hub_report import bootstrap_hub_report_state, schedule_hub_report_updates, refresh_hub_reports
 from app.config import WELCOME_TEXT, LOGS_DIR, MAX_TOKEN, UPDATE_DATA_ALLOWED_USER_IDS
 from app.utils.http import run_http
-from app.utils.max_api import get_updates, send_text
+from app.utils.max_api import get_updates, send_text, send_text_with_reply_buttons
 from app.utils.chat_memory import remember_chat_id
 from app.handlers.registration import (
     RegistrationState,
@@ -56,6 +56,34 @@ from app.handlers.move import (
 )
 
 logger = logging.getLogger(__name__)
+
+MENU_COMMANDS: list[tuple[str, str]] = [
+    ("Регистрация", "/registration"),
+    ("Начало смены", "/start_job_shift"),
+    ("Конец смены", "/end_work_shift"),
+    ("Брак", "/damage"),
+    ("Сборка", "/sborka"),
+    ("Собери", "/soberi"),
+    ("Номенклатура", "/nomenclature"),
+    ("Открыть ворота", "/open_gate"),
+    ("Парковка", "/parking"),
+    ("Заправка", "/zapravka"),
+    ("Расход", "/expense"),
+    ("Отчет по расходу", "/report_expense"),
+    ("Перемещение", "/move"),
+    ("Обновить данные", "/update_data"),
+]
+
+
+async def _send_menu_commands(chat_id: int) -> None:
+    labels = [label for label, _ in MENU_COMMANDS]
+    payloads = [command for _, command in MENU_COMMANDS]
+    await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text="Выберите команду:",
+        button_texts=labels,
+        button_payloads=payloads,
+    )
 
 async def _refresh_reference_caches(chat_id: int) -> None:
     await send_text(chat_id, "Обновление списков началось")
@@ -397,6 +425,8 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "reset_cache": "/reset_cache",
         "очистить кэш": "/reset_cache",
         "print_move": "/print_move",
+        "menu": "/menu",
+        "меню": "/menu",
     }
     is_command = False
     if t:
@@ -447,6 +477,10 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
 
     if t == "/start":
         await send_text(chat_id, WELCOME_TEXT)
+        return
+
+    if t == "/menu":
+        await _send_menu_commands(chat_id)
         return
 
     if t == "/registration":
@@ -548,7 +582,7 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     # 3) Default
-    await send_text(chat_id, "Команды: /start, /registration, /start_job_shift, /end_work_shift, /damage, /sborka, /check, /soberi, /open_gate")
+    await send_text(chat_id, "Команда не распознана. Введите /menu, чтобы открыть список команд.")
 
 async def _polling_loop() -> None:
     marker: Optional[int] = None

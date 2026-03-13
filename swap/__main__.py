@@ -1,3484 +1,3303 @@
-import logging
-import asyncio
-import json
+import telebot
 import requests
-import traceback
-import time
 import re
-import os
+import logging
 import threading
-from collections import defaultdict
-from enum import IntEnum
-from datetime import datetime, timedelta
-from pathlib import Path
-from gspread.exceptions import APIError
+import time
+import json
 import random
-import asyncio
-from app.config import TOKEN_BOT, chat_id_damage_Sity, chat_id_sborka_Sity, chat_id_damage_Yandex,urlSendMediaGroup, LOGS_DIR, thread_id_gates_Yandex, thread_id_gates_Sity
-from app.config import chat_id_sborka_Yandex, thread_id_sborka_Yandex, thread_id_sborka_Sity, link_damage_Sity
-from app.config import link_sborka_Sity, link_damage_Yandex, link_sborka_Yandex, tablo, list_users, list_users_belka
-from app.config import POR_NOMER_REZ, POR_NOMER_DIS, URL_GET_FIO,chat_id_change_work, thread_id_change_work, URL_REGISTRASHION, URL_GET_INFO_TASK
-from app.config import chat_id_sborka_Belka, link_sborka_Belka, thread_id_sborka_Belka, chat_id_damage_Belka, link_damage_Belka, thread_id_damage_Belka
-from app.utils.gsheets import update_all_sheets, get_max_nomer_sborka, write_soberi_in_google_sheets_rows, loading_bz_znaniya
-from app.utils.gsheets import get_number_util, write_in_answers_ras, write_soberi_in_google_sheets, process_transfer_record, update_data_sborka, write_open_gate_row, find_logistics_rows
-from app.utils.gsheets import get_record_sklad, nomer_sborka, nomer_sborka_ko, update_record_sborka, write_in_answers_ras_nomen, write_in_answers_ras_shift
-from app.states import DamageStates, SoberiStates, DemountingStates, SborkaStates, NomenclatureStates, StartJobShiftStates, EndWorkShiftStates, RegistrationStates, CheckStates, OpenGateStates
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+import gspread
+from gspread import Client, Spreadsheet
+from enum import IntEnum
+import sqlite3
+from telebot.apihelper import ApiTelegramException
+from gspread.exceptions import APIError
 
-# aiogram
-from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.types import ParseMode, ContentType
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
-from aiogram.utils import executor
+DB_PATH = "/clean-car-tire-repair-technician-bot/data/xab_messages.db"
 
-# aiogram FSM
-from aiogram.dispatcher import FSMContext
-from aiogram.dispatcher.filters.state import State, StatesGroup
-
-from app.config import GOOGLE_DRIVE_CREDS_JSON, GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID
-from app.utils.drive_zip import safe_zip_name, build_zip_from_tg_files, upload_zip_private
-
-# ------------------------------------------------------------
-# Инициализируем бота и диспетчер (aiogram)
-# ------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+##
+# Рабочий вариант
+token_bot = "7608683053:AAEkp6pFtsSsacnou3PyKnBYEPSX-Wc9Qco"
+chat_id_Yandex = -1001739909868
+thread_id_Yandex = 45467
+thread_id_Yandex_zapr = 59180
+thread_id_Yandex_gates = 166590
+link_Yandex = 1739909868
+thread_id_Yandex_ras = 45470
+thread_id_Yandex_move = 59034
+thread_id_Yandex_hab = 59036
+chat_id_Sity = -1002188632791
+thread_id_Sity =  9
+thread_id_Sity_zapr = 13428
+thread_id_Sity_gates = 250602
+link_Sity = 2188632791
+thread_id_Sity_ras = 12
+thread_id_Sity_move = 13129
+thread_id_Sity_hab = 13142
+chat_id_Belka = -1003111588590
+thread_id_Belka = 6
+thread_id_Belka_zapr = 5
+link_Belka = 3111588590
+thread_id_Belka_ras = 9
+thread_id_Belka_move = 4
+thread_id_Belka_hab = 8
+chat_id_common = -1002005014821
+urlAddUser = "https://app.clean-car.net/api/v2/bots/telegram_information/update/"
+urlSmallDtp = "https://app.clean-car.net/api/v2/bots/accident/retrieve/"
+URL_GET_INFO_TASK = "https://app.clean-car.net/api/v2/bots/open_tasks/list/"
 
-bot = Bot(token=TOKEN_BOT, parse_mode=ParseMode.HTML)
-dp = Dispatcher(bot, storage=MemoryStorage())
-loop = asyncio.get_event_loop()
+# Тестовый вариант
+# token_bot = "7413900981:AAHCsVFC2RMQmnboDs6qA5PiIkvMsxvhQoY"
+# chat_id_Yandex = -1002371648868
+# thread_id_Yandex = 2555
+# thread_id_Yandex_zapr = 2555
+# thread_id_Yandex_gates = 2555
+# link_Yandex = 2371648868
+# thread_id_Yandex_ras = 2555
+# thread_id_Yandex_move = 2555
+# thread_id_Yandex_hab = 2555
+# chat_id_Sity = -1002371648868
+# thread_id_Sity = 2555
+# thread_id_Sity_zapr = 2555
+# thread_id_Sity_gates = 2555
+# link_Sity = 2371648868
+# thread_id_Sity_ras = 2555
+# thread_id_Sity_move = 2555
+# thread_id_Sity_hab = 2555
+# chat_id_Belka = -1002371648868
+# thread_id_Belka = 2555
+# thread_id_Belka_zapr = 2555
+# link_Belka = 2371648868
+# thread_id_Belka_ras = 2555
+# thread_id_Belka_move = 2555
+# thread_id_Belka_hab = 2555
+# chat_id_common = -1002371648868
+# urlAddUser = "https://stage.app.clean-car.net/api/v2/bots/telegram_information/update/"
+# urlGetUserInfo = "https://stage.app.clean-car.net/api/v2/bots/accident/retrieve/"
+# urlSmallDtp = "https://stage.app.clean-car.net/api/v2/bots/accident/retrieve/"
+# URL_GET_INFO_TASK = "https://stage.app.clean-car.net/api/v2/bots/open_tasks/list/"
 
-update_time = datetime.now() - timedelta(hours=3)
+bot = telebot.TeleBot(f"{token_bot}")
+gspread_url_baza_zn = "https://docs.google.com/spreadsheets/d/1Rk_9eyjx0u5dUGnz84-6GCshd1zLLWOR-QGPZtQTMKg/edit?gid=1510247160#gid=1510247160"
+gspread_url_rasxod_shm = "https://docs.google.com/spreadsheets/d/14vrAidePmR78-l9R31tWOTxCADmqvseLIHhR7fY1kR4/edit?gid=729033122#gid=729033122"
+gspread_url_peremeshenie = "https://docs.google.com/spreadsheets/d/1p044-xtk5TxFOsPZ9l_kbthc53toqdh3kRXrGbU5Iao/edit?gid=766771694#gid=766771694"
+#gspread_url_peremeshenie = "https://docs.google.com/spreadsheets/d/1DQ87q8-qqgjlz8c0ZsqYpNKrYqqNrwil2ApKE23JLLs/edit?gid=0#gid=0"
+gspread_url_rasxod = "https://docs.google.com/spreadsheets/d/1iH5IeurStoNQB9FKwdxehTF5hB_1QcX9LFYjpVqsxvo/edit?pli=1&gid=0#gid=0"
+gspread_url_gates = "https://docs.google.com/spreadsheets/d/1BH7HDYBS6E-nSoq3ZBQljhA74aAEe8QIOviwOPpAyX4/edit?gid=0#gid=0"
+URL_GOOGLE_SHEETS_CHART = "https://docs.google.com/spreadsheets/d/15Kw7bweFKg3Dp0INeA47eki1cuPIgtVgk_o_Ul3LGyM/edit?gid=1647640846#gid=1647640846"
 
-key_type_kolesa = ["В сборе", "Только резина", "Диск"]
-key_grz = []
+urlSendMediaGroup = f"https://api.telegram.org/bot{token_bot}/sendMediaGroup"
+
+mvrecords = list() # Перемещение
+pkrecords = list() # Парковка
+zprecords = list() # Заправка
+rsrecords = list() # Расход
+
+grz_ts_ya = list()
+grz_ts_st = list()
+grz_ts_blk = list()
+marka_ts_ya = list()
+marka_ts_st = list()
+marka_ts_blk = list()
+list_rez_ya = list()
+list_rez_st = list()
+list_rez_blk = list()
+grz_tech = list()
+list_users = [796932736, 1050518459, 547087397, 548446822]
+# Глобальные переменные для кэша
+global_xab_cache = None
+global_cache_usage = 0
+# Множество id пользователей, которые уже «захватили» кэш
+users_with_cache = {}
+last_message_ids = {
+    "Яндекс": 0,
+    "СитиДрайв": 0,
+    "Белка": 0
+}
+
+XAB_PER_PAGE = 25
+xab_pages = {}
+
+# Структура списка для перемещения
+class Mv(IntEnum):
+    USER_ID = 0
+    USERNAME = 1
+    FIO = 2
+    GRZ_TECH = 3
+    TYPE_ACTION = 4
+    GRZ_PEREDACHA = 5
+    COMPANY = 6
+
+
+# Структура списка для парковки
+class Pk(IntEnum):
+    USER_ID = 0
+    USERNAME = 1
+    FIO = 2
+    GRZ_TECH = 3
+    COMPANY = 4
+    GRZ_ZADACHA = 5
+    TIP_DOCUMENT = 6
+    # Фото
+    # Ссылка на сообщение
+
+# Структура списка для заправки
+class Zp(IntEnum):
+    USER_ID = 0
+    USERNAME = 1
+    FIO = 2
+    GRZ_TECH = 3
+    COMPANY = 4
+    PROBEG = 5
+    SUMMA = 6
+    TIP_DOCUMENT = 7
+    # Фото
+    # Ссылка на сообщение
+
+# Структура списка для расхода
+class Rs(IntEnum):
+    USER_ID = 0
+    USERNAME = 1
+    FIO = 2
+    GRZ_TECH = 3
+    COMPANY = 4
+    GOROD = 5
+    GRZ_ZADACHA = 6
+    SUMMA = 7
+    OPLATA = 8
+    DOP_OPLATA = 9
+    PRICIHA = 10
+    TIP_DOCUMENT = 11
+    # Фото
+
+class Rc(IntEnum):
+    MARKA_TS = 0
+    RADIUS = 1
+    RAZMER = 2
+    MARKA_REZ = 3
+    MODEL_REZ = 4
+    SEZON = 5
+    TIP_DISKA = 6
+    COUNT_LEFT = 7
+    COUNT_RIGHT = 8
+
+class Og(IntEnum):
+    USER_ID = 0
+    USERNAME = 1
+    FIO = 2
+    CAR_PLATE = 3
+    COMPANY = 4
+
+open_gate_records = []
+
+key_type = ["Комплект", "Ось", "Правое колесо", "Левое колесо"]
 key_company = ["СитиДрайв", "Яндекс", "Белка"]
-key_company_small = ["СитиДрайв", "Яндекс"]
-key_count = ["1 колесо", "Ось", "Комплект"]
-key_radius = ["15", "16", "17", "18", "19", "20"]
 key_exit = []
-key_approve = ["Подтверждаю"]
+key_sity = ["Москва", "Санкт-Петербург"]
+key_oplata = ["Бизнес-карта", "Наличные <> Перевод <> Личная карта"]
+key_oplata_dop = ["Подача на возмещение(свои деньги) + 6%"]
+key_action = ["Забираете со склада", "Сдаете бой", "Передаете в техничку"]
 key_type_disk = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
-key_type_check = ["Левое колесо","Правое колесо", "Ось", "Комплект"]
-key_condition_disk = ["Ок", "Ремонт", "Утиль"]
-key_condition_rezina = ["Ок","Ремонт", "Утиль"]
-key_reason_ytilia = ["Езда на спущенном", "Износ протектора", "Боковой пробой", "Грыжа", ]
-key_reason_remonta = ["Латка", "Грибок", "Замена вентиля", "Герметик борта"]
-key_reason_rem_ytilia_diska = ["Искревление ОСИ", "Трещина", "Отколот кусок", "Замена датчика давления"]
-key_dir_kolesa = ["Левое", "Правое"]
-key_type_sborka = ["Комплект", "Ось"]
 key_sogl = ["Да", "Нет"]
-key_object = ["Комплект","Ось","Колесо"]
+key_corek = ["Заполнено корректно", "Заполнено не корректно"]
+key_action_record = ["Добавить запись", "Удалить запись", "Завершить"]
 key_chisla = ["0","1","2","3","4","5"]
-key_ready = ["Готово"]
-
-# Структура Листа Резина Сити
-class GHRezina(IntEnum):
-    NOMER = 0
-    RADIUS = 1  # Радиус
-    RAZMER = 2  # Размер
-    SEZON = 3  # Сезон
-    MARKA = 4  # Марка
-    MODEL = 5  # Модель
-    COMPANY = 6  # Компания
-    MARKA_TS = 7  # Марка ТС
 
 # Регулярное выражение для проверки государственного номера автомобиля
 REGEX_AUTO_NUMBER = r'^[а-я]{1}\d{3}[а-я]{2}\d{2,3}$'
 
-# -------------------------------------------------------------------------------------------------------
-def _safe_fullname_from_profile(rep: dict | None, message) -> str:
-    """Возвращает ФИО из ответа бекенда или строит его из данных Telegram.
-    Никогда не кидает KeyError.
-    Приоритет: rep['user']['fullname'] -> rep['fullname'] -> rep['fio'] -> Telegram (first+last) -> @username -> user_id
-    """
-    fio = None
-    used_backend = False
+def _normalize_plate(s: str) -> str:
+    """Убираем пробелы и приводим к нижнему регистру (для проверки формата)."""
+    return re.sub(r'\s+', '', str(s or '')).lower()
+
+def _is_plate_format(s: str) -> bool:
+    """Проверка строки на формат ГРЗ (без учёта наличия в списке)."""
+    return re.match(REGEX_AUTO_NUMBER, _normalize_plate(s)) is not None
+
+def _safe_delete_message(chat_id, msg_id):
     try:
-        if isinstance(rep, dict):
-            user_obj = rep.get('user') if isinstance(rep.get('user'), dict) else None
-            if user_obj and isinstance(user_obj.get('fullname'), str) and user_obj.get('fullname').strip():
-                fio = user_obj.get('fullname').strip(); used_backend = True
-            elif isinstance(rep.get('fullname'), str) and rep.get('fullname').strip():
-                fio = rep.get('fullname').strip(); used_backend = True
-            elif isinstance(rep.get('fio'), str) and rep.get('fio').strip():
-                fio = rep.get('fio').strip(); used_backend = True
-    except Exception:
-        pass
-    if not fio:
-        try:
-            logging.warning("No 'user.fullname' in profile response; fallback to Telegram name for user_id=%s",
-                            getattr(message.from_user, 'id', ''))
-        except Exception:
-            pass
-        fn = (getattr(message.from_user, 'first_name', '') or '').strip()
-        ln = (getattr(message.from_user, 'last_name', '') or '').strip()
-        if fn or ln:
-            fio = (fn + ' ' + ln).strip()
-        elif getattr(message.from_user, 'username', None):
-            fio = '@' + str(message.from_user.username)
-        else:
-            fio = str(message.from_user.id)
-    return fio
+        bot.delete_message(chat_id, msg_id)
+    except ApiTelegramException as e:
+        # Частые кейсы: "message can't be deleted", "message to delete not found"
+        msg = str(e)
+        if ("message can't be deleted" in msg) or ("message to delete not found" in msg):
+            # Просто пропускаем, не мусорим лог
+            return
+        # Остальное можно записать как warning, без трейсбэка
+        logger.warning("Can't delete message %s in %s: %s", msg_id, chat_id, e)
+    except Exception as e:
+        logger.warning("Unexpected error deleting message %s in %s: %s", msg_id, chat_id, e)
 
-_GS_CONCURRENCY = int(os.environ.get("GS_CONCURRENCY", "3"))
-_gs_sema = threading.Semaphore(_GS_CONCURRENCY)
 
-def with_sheets_retry(func, *args, max_attempts=6, base_delay=1.0, **kwargs):
-    """
-    Выполняет func(*args, **kwargs) с повтором при APIError 5xx/429.
-    Ограничивает конкурентность до GS_CONCURRENCY потоков (по умолчанию 3).
-   """
-    for attempt in range(1, max_attempts + 1):
-        try:
-            with _gs_sema:
-                return func(*args, **kwargs)
-        except APIError as e:
-            code = getattr(e.response, "status_code", None)
-            if code in (500, 502, 503, 504, 429):
-                # 429: уважаем Retry-After если есть
-                retry_after = 0.0
-                try:
-                    retry_after = float(e.response.headers.get("Retry-After", "0"))
-                except Exception:
-                    retry_after = 0.0
-                # экспонента + джиттер
-                backoff = base_delay * (2 ** (attempt - 1))
-                jitter = random.uniform(0, 0.4 * backoff)
-                delay = max(retry_after, backoff + jitter)
-                logger.warning(
-                    f"[attempt {attempt}] Sheets API {code}, sleeping {delay:.2f}s and retrying..."
-                )
-                time.sleep(delay)
-                continue
-            # Остальные ошибки — пробрасываем сразу
-            raise RuntimeError(f"Google Sheets API failed after {max_attempts} attempts")
 # -------------------------------------------------------------------------------------------------------
-@dp.message_handler(commands=["registration"], state="*")
-async def cmd_registration(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        await message.answer("Команда доступна только в ЛС")
-        return
+# Ловит сообщение с фото/документ и переправляет его в соотвествующий обработчик
+@bot.message_handler(content_types=['photo', 'document'])
+def FilesReception(message):
+    global pkrecords
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            if len(record) == Pk.TIP_DOCUMENT:
+                record.append(message.content_type)
+            if str(record[Pk.TIP_DOCUMENT]) == 'photo':
+                record.append(message.photo[-1].file_id)
+            elif str(record[Pk.TIP_DOCUMENT]) == 'document':
+                record.append(message.document.file_id)
+            if len(record) == Pk.TIP_DOCUMENT + 2:
+                generating_report_parking(message)
+            return
+    global zprecords
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == message.from_user.id:
+            if len(record) == Zp.TIP_DOCUMENT:
+                record.append(message.content_type)
+            if len(record) <= Zp.TIP_DOCUMENT + 4:
+                if str(record[len(record) - 1]) == str(1):
+                    if str(record[Zp.TIP_DOCUMENT]) == 'photo':
+                        record[len(record) - 1] = message.photo[-1].file_id
+                    elif str(record[Zp.TIP_DOCUMENT]) == 'document':
+                        record[len(record) - 1] = message.document.file_id
+                    generating_report_zapravka(message)
+                    return
+            if str(record[Zp.TIP_DOCUMENT]) == 'photo':
+                record.append(message.photo[-1].file_id)
+            elif str(record[Zp.TIP_DOCUMENT]) == 'document':
+                record.append(message.document.file_id)
+            if len(record) == Zp.TIP_DOCUMENT + 2:
+                generating_report_zapravka(message)
+            return
+    global rsrecords
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if len(record) == Rs.TIP_DOCUMENT:
+                record.append(message.content_type)
+            if str(record[Rs.TIP_DOCUMENT]) == 'photo':
+                record.append(message.photo[-1].file_id)
+            elif str(record[Rs.TIP_DOCUMENT]) == 'document':
+                record.append(message.document.file_id)
+            if len(record) == Rs.TIP_DOCUMENT + 2:
+                generating_report_expense(message)
+            return
+    global mvrecords
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            number_last_list = get_number_last_list(record)
+            if len(record) == 7 + number_last_list:
+                record.append(message.content_type)
+            if len(record) == 10 + number_last_list:
+                if str(record[len(record) - 1]) == str(1):
+                    if str(record[7 + number_last_list]) == 'photo':
+                        record[len(record) - 1] = message.photo[-1].file_id
+                    elif str(record[7 + number_last_list]) == 'document':
+                        record[len(record) - 1] = message.document.file_id
+                    generating_report_move(message)
+                    return
+            if str(record[7 + number_last_list]) == 'photo':
+                record.append(message.photo[-1].file_id)
+            elif str(record[7 + number_last_list]) == 'document':
+                record.append(message.document.file_id)
+            if len(record) == number_last_list + 9:
+                generating_report_move(message)
+            return
 
-    # Очищаем предыдущее состояние
-    await state.finish()
+# -------------------------------------------------------------------------------------------------------
+@bot.message_handler(commands=['start'])
+def registration(message):
+    if int(message.chat.id) > 0:
+        keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        keyboard.add(telebot.types.KeyboardButton(text="Поделиться контактом", request_contact=True))
+        bot.send_message(message.chat.id, "Убедитесь, что в приложение КЛИНКАР указан номер телефона, который "
+                                          "привязан к аккаунту Телеграм в формате 7********** и нажмите на кнопку Поделиться контактом",
+                         reply_markup=keyboard)
+    else:
+        bot.reply_to(message, "Перейдите в личные сообщение с ботом для оформления заявки")
 
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add(types.KeyboardButton(text="📱 Поделиться контактом", request_contact=True))
-    kb.add(types.KeyboardButton(text="❌ Выход"))
-
-    await message.answer(
-        "Убедитесь, что в приложение КЛИНКАР указан номер телефона, который привязан к аккаунту Телеграм в формате 7**********.\n"
-        "Нажмите на кнопку 'Поделиться контактом':",
-        reply_markup=kb
-    )
-    await RegistrationStates.WAIT_PHONE.set()
-
-@dp.message_handler(state=RegistrationStates.WAIT_PHONE, content_types=["contact"])
-async def process_contact(message: types.Message, state: FSMContext):
-    contact = message.contact
-
-    # Проверяем, что пользователь отправил свой контактный номер, а не чужой
-    if message.from_user.id != contact.user_id:
-        await message.answer("Отправьте свой собственный номер телефона.")
-        return
-
-    phone_number = re.sub("[^0-9]", "", contact.phone_number)
+@bot.message_handler(content_types=['contact'])
+def read_contact_phone(message):
+    phone = message.contact.phone_number
     user_id = message.from_user.id
-    username = message.from_user.username if message.from_user.username else "не указан"
-
-    json_data = {
-        "phone": phone_number,
-        "tg_username": username,
-        "tg_chat_id": str(user_id)
-    }
-
+    username = message.from_user.username
+    keyboard = telebot.types.ReplyKeyboardRemove()
+    json_data = {"phone": str(re.sub("[^0-9]", "", phone)), "tg_username": str(username), "tg_chat_id": str(user_id)}
     try:
-        response = requests.post(URL_REGISTRASHION, json=json_data)
-        if response.status_code < 400:
-            await message.answer("✅ Вы успешно прошли регистрацию!", reply_markup=types.ReplyKeyboardRemove())
+        resp = requests.post(urlAddUser, json=json_data)
+        if resp.status_code < 399:
+            bot.send_message(message.chat.id, "Вы прошли регистрацию", reply_markup=keyboard)
         else:
-            response_data = response.json()
-            await message.answer(f"⚠ Ошибка: {response_data.get('result', 'Неизвестная ошибка')}",
-                                 reply_markup=types.ReplyKeyboardRemove())
+            temp_dict = resp.json()
+            bot.send_message(message.chat.id, temp_dict["result"], reply_markup=keyboard)
     except Exception as e:
         logging.exception(e)
-        await message.answer("❌ Произошла ошибка. Пожалуйста, обратитесь к разработчикам.")
+        bot.send_message(message.chat.id, "Произошла ошибка. Обратитесь к разработчикам")
 
-    await state.finish()
-
-@dp.message_handler(state=RegistrationStates.WAIT_PHONE, text="❌ Выход")
-async def cancel_registration(message: types.Message, state: FSMContext):
-    await state.finish()
-    await message.answer("❌ Регистрация отменена.", reply_markup=types.ReplyKeyboardRemove())
-# -------------------------------------------------------------------------------------------------------
-
-@dp.message_handler(commands=["zayavka_sborka"], state="*")
-async def cmd_zayavka_sborka(message: types.Message, state: FSMContext):
-    global update_time
-    update_time = datetime.now()
-    await print_zayavka()
-
-async def print_zayavka():
-    try:
-        # если with_sheets_retry — блокирующая, обёрнём её в to_thread
-        tlist = await asyncio.to_thread(with_sheets_retry, get_record_sklad, max_attempts=5, base_delay=1)
-    except RuntimeError:
-        logger.error("Не удалось получить данные из Google Sheets после 5 попыток")
-        return
-
-    if not tlist:
-        return
-
-    # Подсчет количества одинаковых записей
-    grouped_records = defaultdict(int)
-    for record in tlist:
-        key = tuple(record[0:])  # Используем всю запись в качестве ключа
-        grouped_records[key] += 1
-
-    # Формирование строк для вывода
-    str_list = []
-    for record, count in grouped_records.items():
-        # Формирование базовой части строки
-        sb_number = record[10]  # Здесь хранится 'sb12', 'sb13' и т.д.
-        string = (
-            f"{sb_number} | {count} шт | {record[0]} | {record[1]} | {record[3]}/{record[2]} | "
-        )
-        if record[4]:
-            string += f"{record[4]} {record[5]} | "
-        if record[6]:
-            string += f"{record[6]} | "
-        if record[7]:
-            string += f"{record[7]} | "
-        if record[8]:
-            string += f"{record[8]} | "
-        if record[9]:
-            string += f"{record[9]}ч"
-        if record[16]:
-            string += f"| {record[16]}"
-        string += "\n---------------------------\n"
-
-        # Проверка на наличие ранее добавленной записи с таким же номером и "2 шт"
-        # Если найдём, заменим "2 шт" на "комплект" и удалим "Левое | " / "Правое | "
-        found_index = -1
-        for i, s in enumerate(str_list):
-            if s.startswith(f"{sb_number} | 2 шт"):
-                new_s = s.replace("2 шт", "комплект")
-                new_s = new_s.replace("Левое | ", "")
-                new_s = new_s.replace("Правое | ", "")
-                str_list[i] = new_s
-                found_index = i
-                break
-
-        if found_index != -1:
-            continue
-
-        # Новая проверка для составления оси:
-        # Если для одного номера уже есть запись с "1 шт" и в ней содержится "Левое |"
-        # а текущая запись содержит "Правое |" (или наоборот),
-        # то объединяем их в одну строку, заменяя "1 шт" на "ось"
-        found_index_axis = -1
-        for i, s in enumerate(str_list):
-            if s.startswith(f"{sb_number} | 1 шт"):
-                if ("Левое | " in s and "Правое | " in string) or ("Правое | " in s and "Левое | " in string):
-                    new_s = s.replace("1 шт", "ось")
-                    new_s = new_s.replace("Левое | ", "")
-                    new_s = new_s.replace("Правое | ", "")
-                    str_list[i] = new_s
-                    found_index_axis = i
-                    break
-        if found_index_axis != -1:
-            continue
-
-        # Если ни одна из проверок не сработала, добавляем строку
-        str_list.append(string)
-
-
-    # Отправка сообщений блоками по 40 записей (или 30, как в оригинальном коде)
-    out_str = ""
-    len_ = 0
-    for record in str_list:
-        out_str += record
-        len_ += 1
-        if len_ > 30:
-            # print(out_str)
-            # await bot.send_message(tablo, out_str, parse_mode="Markdown")
-            await bot.send_message(tablo, out_str)
-            out_str = ""
-            len_ = 0
-
-    if len_ > 0:
-        # print(out_str)
-        await bot.send_message(tablo, out_str)
-        # await bot.send_message(tablo, out_str, parse_mode="Markdown")
-
-
-async def periodic_print_zayavka():
-    # сразу первый прогон
-    await print_zayavka()
-    # а затем — ровно через каждый час
-    while True:
-        await asyncio.sleep(3600)
-        await print_zayavka()
-
-@dp.message_handler(commands=["update_data"], state="*")
-async def cmd_update_data(message: types.Message, state: FSMContext):
-    if message.from_user.id not in list_users:
-        return await message.answer("У вас нет прав для вызова данной команды")
-
-    await message.answer("Обновление списков началось")
-    try:
-        with_sheets_retry(
-            loading_rezina_is_Google_Sheets,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось загурзить из Гугл Таблицы данные после 3 попыток")
-        return await message.answer(
-            "Не удалось  обновить базу данных. Попробуйте чуть позже."
-        )
-
-    try:
-        with_sheets_retry(
-            loading_model_is_Google_Sheets,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось загрузить из Гугл Таблицы данные после 3 попыток")
-        return await message.answer(
-            "Не удалось  обновить базу данных. Попробуйте чуть позже."
-        )
-    await message.answer("Обновление завершено")
-
-
-@dp.message_handler(commands=["damage"], state="*")
-async def cmd_damage(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[damage] User @{user.username} ({user.id}) начал оформление повреждения")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
-    await message.answer("Компания:",reply_markup=getKeyboardStep1(key_company))
-    await DamageStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=DamageStates.WAIT_COMPANY)
-async def damage_step_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    await state.update_data(company=message.text)
-
-    # Предлагаем ввести город
-    await message.answer("Вид колеса:", reply_markup=getKeyboardList(key_type_kolesa))
-    await DamageStates.WAIT_VID_KOLESA.set()
-
-
-@dp.message_handler(state=DamageStates.WAIT_VID_KOLESA)
-async def damage_step_vid_kolesa(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Компания:", reply_markup=getKeyboardStep1(key_company))
-        await DamageStates.WAIT_COMPANY.set()
-        return
-
-    vid_kolesa = message.text
-    await state.update_data(vid_kolesa=vid_kolesa)
-
-    if vid_kolesa == "В сборе":
-        await message.answer("Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_grz))
-        await DamageStates.WAIT_VVOD_GRZ.set()
-    elif vid_kolesa == "Только резина":
-        data = await state.get_data()
-        company = data.get("company", "")
-        await message.answer("Радиус:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DamageStates.WAIT_RADIUS.set()
-    elif vid_kolesa == "Диск":
-        await message.answer("Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_grz))
-        await DamageStates.WAIT_VVOD_GRZ.set()
-
-@dp.message_handler(state=DamageStates.WAIT_VVOD_GRZ)
-async def damage_step_vvod_grz(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Вид колеса:", reply_markup=getKeyboardList(key_type_kolesa))
-        await DamageStates.WAIT_VID_KOLESA.set()
-        return
-
-    if message.text == "Грз отсутствует на колесе":
-        await damage_step_vvod_grz_2(message, state)
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    grz_ts = getGRZTs(company, message.text.lower())
-
-    if len(grz_ts):
-        await message.answer("Подтвердите ГРЗ из списка:", reply_markup=getKeyboardStep1(sorted(grz_ts)))
-        await DamageStates.WAIT_APPROVE_GRZ.set()
-    else:
-        await state.update_data(grz_no_base=message.text.lower())
-        await message.answer("В базе данных нет введенного вами ГРЗ. Подвердите правильность введенного госномера", reply_markup=getKeyboardList(key_approve))
-        await DamageStates.WAIT_APPROVE_GRZ.set()
-
-
-@dp.message_handler(state=DamageStates.WAIT_APPROVE_GRZ)
-async def damage_step_approve_grz(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-    
-    if message.text == "Назад":
-        await message.answer("Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_grz))
-        await DamageStates.WAIT_VVOD_GRZ.set()
-        return
-    elif message.text == "Подтверждаю":
-        data = await state.get_data()
-        await state.update_data(grz=data.get("grz_no_base", ""))
-    else:
-        grz = message.text
-        await state.update_data(grz=grz)
-
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    grz = data.get("grz", "")
-
-    model = ""
-    if company == "СитиДрайв":
-        source_list = list_per_st
-        MODEL = 2
-        NOMER = 0
-    elif company == "Яндекс":
-        source_list = list_per_ya
-        MODEL = 3
-        NOMER = 0
-    else:
-        source_list = list_per_blk
-        MODEL = 1
-        NOMER = 2
-
-    for row in source_list:
-        if str(row[NOMER]) == grz:
-            model = str(row[MODEL])
-            break
-
-    if not model:
-        await message.answer("Номер не найден в базе данных. Введите модель и марку автомобиля вручную",
-            reply_markup=getKeyboardList(key_exit))
-        await DamageStates.WAIT_VVOD_MARKA_TS.set()
-        return
-
-    kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add(KeyboardButton(model))
-    kb.add(KeyboardButton("Ввести вручную"))
-    kb.add(KeyboardButton("Назад"), KeyboardButton("Выход"))
-
-    await message.answer("Марка автомобиля:", reply_markup=kb)
-    await DamageStates.WAIT_VVOD_MARKA_TS.set()
-
-@dp.message_handler(state=DamageStates.WAIT_VVOD_GRZ_2)
-async def damage_step_vvod_grz_2(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_grz))
-        await DamageStates.WAIT_VVOD_GRZ.set()
-        return
-
-    if message.text != "Ввести вручную":
-        if message.text == "Грз отсутствует на колесе":
-            await state.update_data(grz="б/н")
-
-        else:
-            await state.update_data(grz=message.text)
-
-        data = await state.get_data()
-        company = data.get("company", "")
-        await message.answer("Радиус:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DamageStates.WAIT_RADIUS.set()
-    else:
-        await message.answer("Введите модель и марку автомобиля вручную",
-                         reply_markup=getKeyboardList(key_exit))
-        await DamageStates.WAIT_VVOD_MARKA_TS.set()
-
-
-@dp.message_handler(state=DamageStates.WAIT_VVOD_MARKA_TS)
-async def damage_step_vvod_marka_ts(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_grz))
-        await DamageStates.WAIT_VVOD_GRZ.set()
-        return
-
-    await state.update_data(marka_ts=message.text)
-
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    await message.answer("Радиус:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-    await DamageStates.WAIT_RADIUS.set()
-
-@dp.message_handler(state=DamageStates.WAIT_RADIUS)
-async def damage_step_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    vid_kolesa = data.get("vid_kolesa", "")
-    company = data.get("company", "")
-    grz = data.get("grz", "")
-
-    if message.text == "Назад" and vid_kolesa == "В сборе":
-        model = ""
-        if company == "СитиДрайв":
-            source_list = list_per_st
-            MODEL = 2
-        elif company == "Яндекс":
-            source_list = list_per_ya
-            MODEL = 3
-        else:
-            source_list = list_per_blk
-            MODEL = 3
-        NOMER = 0
-        for row in source_list:
-            if str(row[NOMER]) == grz:
-                model = str(row[MODEL])
-                break
-
-        kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        kb.add(KeyboardButton(model))
-        kb.add(KeyboardButton("Ввести вручную"))
-        kb.add(KeyboardButton("Назад"), KeyboardButton("Выход"))
-
-        await message.answer("Марка автомобиля:", reply_markup=kb)
-        await DamageStates.WAIT_VVOD_MARKA_TS.set()
-        return
-    elif message.text == "Назад" and vid_kolesa == "Только резина":
-        await message.answer("Компания:", reply_markup=getKeyboardStep1(key_company))
-        await DamageStates.WAIT_COMPANY.set()
-        return
-    elif message.text == "Назад" and vid_kolesa == "Диск":
-        await message.answer(
-            "Марка автомобиля:",
-            reply_markup = getKeyboardList(key_exit)
-            )
-        await DamageStates.WAIT_VVOD_MARKA_TS.set()
-        return
-    radius = message.text
-    if not check_validation_radius(company, radius):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРадиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DamageStates.WAIT_RADIUS.set()
-        return
-
-    await state.update_data(radius=radius)
-
-    if vid_kolesa == "Диск":
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await DamageStates.WAIT_TYPE_DISK.set()
-        return
-
-    await message.answer("Размер:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company,radius))))))
-    await DamageStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=DamageStates.WAIT_RAZMER)
-async def damage_step_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад":
-        await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DamageStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-
-    if not check_validation_razmer(company, radius, razmer):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРазмер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await DamageStates.WAIT_RAZMER.set()
-        return
-
-    await state.update_data(razmer=razmer)
-
-
-    await message.answer("Марка резины:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-    await DamageStates.WAIT_MARKA_REZ.set()
-
-@dp.message_handler(state=DamageStates.WAIT_MARKA_REZ)
-async def damage_step_marka_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-
-    if message.text == "Назад":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await DamageStates.WAIT_RAZMER.set()
-        return
-
-    marka_rez = message.text
-
-    if not check_validation_marka(company, radius, razmer, marka_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await DamageStates.WAIT_MARKA_REZ.set()
-        return
-
-    await state.update_data(marka_rez=marka_rez)
-
-    await message.answer("Модель резины:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-    await DamageStates.WAIT_MODEL_REZ.set()
-
-@dp.message_handler(state=DamageStates.WAIT_MODEL_REZ)
-async def damage_step_model_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await DamageStates.WAIT_MARKA_REZ.set()
-        return
-
-    model_rez = message.text
-
-    if not check_validation_model(company, radius, razmer, marka_rez, model_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМодель резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await DamageStates.WAIT_MODEL_REZ.set()
-        return
-
-    await state.update_data(model_rez=model_rez)
-
-    await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-    await DamageStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=DamageStates.WAIT_SEZON)
-async def damage_step_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    vid_kolesa = data.get("vid_kolesa", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await DamageStates.WAIT_MODEL_REZ.set()
-        return
-
-    sezon = message.text
-
-    if not check_validation_sezon(company, radius, razmer, marka_rez, model_rez,sezon):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await DamageStates.WAIT_SEZON.set()
-        return
-
-    await state.update_data(sezon=sezon)
-
-
-    if vid_kolesa == "Только резина":
-        await message.answer("Состояние резины:",
-                         reply_markup=getKeyboardList(key_condition_rezina))
-        await DamageStates.WAIT_SOST_REZ.set()
-        return
-    await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-    await DamageStates.WAIT_TYPE_DISK.set()
-
-@dp.message_handler(state=DamageStates.WAIT_TYPE_DISK)
-async def damage_step_type_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await DamageStates.WAIT_SEZON.set()
-        return
-
-    await state.update_data(type_disk=message.text)
-
-    if data.get("company", "") == "Яндекс":
-        park_ts = get_park_TS_YNDX(data.get("grz", ""))
-        if park_ts:
-            await message.answer(f"Данное ТС в парке {park_ts}")
-
-    await message.answer("Состояние диска:", reply_markup=getKeyboardList(key_condition_disk))
-    await DamageStates.WAIT_SOST_DISK.set()
-
-@dp.message_handler(state=DamageStates.WAIT_SOST_DISK)
-async def damage_step_sost_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await DamageStates.WAIT_TYPE_DISK.set()
-        return
-
-    sost_disk = message.text
-    await state.update_data(sost_disk=sost_disk)
-
-    data = await state.get_data()
-    vid_kolesa = data.get("vid_kolesa", "")
-    if vid_kolesa == "Диск":
-        if sost_disk == "Ок":
-            await message.answer(
-                "Прикрепите от 2 до 10 фото в одном сообщение. И нажмите на кнопку Готово",
-                reply_markup = _keyboard_done_exit()
-            )
-            await DamageStates.WAIT_FILES.set()
-            return
-        else:
-            await message.answer(
-                "Выберите причину ремонта/утиля диска из предложенных вариантов, либо впишите причину вручную:",
-                reply_markup = getKeyboardList(key_reason_rem_ytilia_diska)
-            )
-            await DamageStates.WAIT_SOST_DISK_PRICH.set()
-            return
-
-    if sost_disk == "Ок":
-        await message.answer("Состояние резины:",
-                         reply_markup=getKeyboardList(key_condition_rezina))
-        await DamageStates.WAIT_SOST_REZ.set()
-    else:
-        await message.answer("Выберите причину ремонта/утиля диска из предложенных вариантов, либо впишите причину вручную:",
-                         reply_markup=getKeyboardList(key_reason_rem_ytilia_diska))
-        await DamageStates.WAIT_SOST_DISK_PRICH.set()
-
-@dp.message_handler(state=DamageStates.WAIT_SOST_DISK_PRICH)
-async def damage_step_sost_disk_prich(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Состояние диска:", reply_markup=getKeyboardList(key_condition_disk))
-        await DamageStates.WAIT_SOST_DISK.set()
-        return
-
-    await state.update_data(sost_disk_prich=message.text)
-
-    data = await state.get_data()
-    vid_kolesa = data.get("vid_kolesa", "")
-    if vid_kolesa == "Диск":
-        await message.answer(
-            "Прикрепите от 2 до 10 фото в одном сообщение. И нажмите на кнопку Готово",
-            reply_markup = _keyboard_done_exit()
-        )
-        await DamageStates.WAIT_FILES.set()
-        return
-
-    await message.answer("Состояние резины:",
-                         reply_markup=getKeyboardList(key_condition_rezina))
-    await DamageStates.WAIT_SOST_REZ.set()
-
-
-@dp.message_handler(state=DamageStates.WAIT_SOST_REZ)
-async def damage_step_sost_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    vid_kolesa = data.get("vid_kolesa", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sost_disk = data.get("sost_disk", "")
-
-    if message.text == "Назад":
-        if message.text == "Назад" and vid_kolesa == "В сборе":
-            if sost_disk == "Ок":
-                await message.answer("Сезонность резины:",
-                                     reply_markup=getKeyboardList(sorted(
-                                         list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-                await DamageStates.WAIT_SEZON.set()
-                return
-            else:
-                await message.answer("Состояние диска:", reply_markup=getKeyboardList(key_condition_disk))
-                await DamageStates.WAIT_SOST_DISK.set()
-                return
-        elif message.text == "Назад" and vid_kolesa == "Только резина":
-            await message.answer("Модель резины:",
-                                 reply_markup=getKeyboardList(
-                                     sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-            await DamageStates.WAIT_MODEL_REZ.set()
-            return
-
-    sost_rez=message.text
-    await state.update_data(sost_rez=sost_rez)
-
-    if sost_rez == "Ремонт":
-        await message.answer("Причина ремонта:", reply_markup=getKeyboardList(key_reason_remonta))
-        await DamageStates.WAIT_SOST_REZ_PRICH.set()
-    elif sost_rez == "Утиль":
-        await message.answer("Выберите причину утиля из предложенных вариантов, либо впишите причину вручную:",
-                         reply_markup=getKeyboardList(key_reason_ytilia))
-        await DamageStates.WAIT_SOST_REZ_PRICH.set()
-    elif sost_rez == "Ок":
-        await message.answer("Прикрепите от 2 до 10 фото в одном сообщение. И нажмите на кнопку Готово",
-                         reply_markup=_keyboard_done_exit())
-        await DamageStates.WAIT_FILES.set()
-@dp.message_handler(state=DamageStates.WAIT_SOST_REZ_PRICH)
-async def damage_step_sost_rez_prich(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Состояние резины:",
-                             reply_markup=getKeyboardList(key_condition_rezina))
-        await DamageStates.WAIT_SOST_REZ.set()
-        return
-
-
-    await state.update_data(sost_rez_prich=message.text)
-
-    await message.answer("Прикрепите от 2 до 10 фото в одном сообщение. И нажмите на кнопку Готово",
-                         reply_markup=_keyboard_done_exit())
-    await DamageStates.WAIT_FILES.set()
-
-# Кнопка "Готово" + "Выход"
-def _keyboard_done_exit():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add("Готово")
-    kb.add("Выход")
-    return kb
-
-@dp.message_handler(
-    content_types=[ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO],
-    state=DamageStates.WAIT_FILES
-)
-async def collect_files(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    # Определяем тип и file_id
-    if message.photo:
-        file_type = 'photo'
-        file_id = message.photo[-1].file_id
-    elif message.document:
-        file_type = 'document'
-        file_id = message.document.file_id
-    elif message.video:
-        file_type = 'video'
-        file_id = message.video.file_id
-    else:
-        return  # неожиданный content_type
-
-    files.append({'type': file_type, 'media': file_id})
-    await state.update_data(files=files)
-
-
-@dp.message_handler(lambda msg: msg.text == "Готово", state=DamageStates.WAIT_FILES)
-async def finalize_expense(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    if not 2 <= len(files) <= 10:
-        return await message.answer("Нужно прикрепить от 2 до 10 файлов")
-
-    username = data.get("username", "")
-    company = data.get("company", "")
-    grz = data.get("grz", "")
-    type_disk = data.get("type_disk", "")
-    marka_ts = data.get("marka_ts", "")
-    vid_kolesa = data.get("vid_kolesa", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sezon = data.get("sezon", "")
-    sost_disk = data.get("sost_disk", "")
-    sost_rez = data.get("sost_rez", "")
-    sost_disk_prich = data.get("sost_disk_prich", "")
-    sost_rez_prich = data.get("sost_rez_prich", "")
-    type = data.get("type", "")
-
-    por_nomer_diska = ""
-    por_nomer_rezina = ""
-
-    is_damage_path = not (type == "check" and (sost_disk == "Ок" and sost_rez == "Ок"))
-
-    if company == "Белка" and is_damage_path:
-        try:
-            zip_name = safe_zip_name(grz)
-            zip_path = await build_zip_from_tg_files(bot, files)
-            loop = asyncio.get_running_loop()
-            file_id = await loop.run_in_executor(
-                None,
-                upload_zip_private,
-                zip_path,
-                zip_name,
-                GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID,
-                GOOGLE_DRIVE_CREDS_JSON
-            )
-
-            logger.info("[drive][belka_damage] uploaded zip name=%s file_id=%s", zip_name, file_id)
-        except Exception:
-            logger.exception("[drive][belka_damage] zip upload failed")
-
-    if sost_disk == "Утиль":
-        try:
-            por_nomer_diska = with_sheets_retry(
-                get_number_util,
-                company,
-                POR_NOMER_DIS,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось получить порядковый номер утиля после 3 попыток")
-            return await message.answer(
-                "Не удалось получить порядковый номер утиля. Попробуйте чуть позже."
-            )
-    if sost_rez == "Утиль":
-        try:
-            por_nomer_rezina = with_sheets_retry(
-                get_number_util,
-                company,
-                POR_NOMER_REZ,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось получить порядковый номер утиля после 3 попыток")
-            return await message.answer(
-                "Не удалось получить порядковый номер утиля. Попробуйте чуть позже."
-            )
-
-    files[0]['caption'] = generating_report_tg(username,company,grz,type_disk,marka_ts,vid_kolesa,radius,razmer,marka_rez,model_rez,sezon,
-                                               sost_disk,sost_rez,sost_disk_prich,sost_rez_prich,por_nomer_diska,por_nomer_rezina,type)
-    if type == "check" and (sost_disk == "Ок" and sost_rez == "Ок"):
-        if company == "СитиДрайв":
-            chatId = chat_id_sborka_Sity
-            chat_id_for_link = link_sborka_Sity
-            thread_id = thread_id_sborka_Sity
-        elif company == "Яндекс":
-            chatId = chat_id_sborka_Yandex
-            chat_id_for_link = link_sborka_Yandex
-            thread_id = thread_id_sborka_Yandex
-        else:
-            chatId = chat_id_sborka_Belka
-            chat_id_for_link = link_sborka_Belka
-            thread_id = thread_id_sborka_Belka
-    else:
-        if company == "СитиДрайв":
-            chatId = chat_id_damage_Sity
-            chat_id_for_link = link_damage_Sity
-            thread_id = None
-        elif company == "Яндекс":
-            chatId = chat_id_damage_Yandex
-            chat_id_for_link = link_damage_Yandex
-            thread_id = None
-        else:
-            chatId = chat_id_damage_Belka
-            chat_id_for_link = link_damage_Belka
-            thread_id = thread_id_damage_Belka
-
-    dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': thread_id, 'media': json.dumps(files)}
-    resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
-    data = resp.json()
-    message_id = data["result"][0]["message_id"]
-    message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
-    generating_report_google_sheets(username,company,grz,type_disk,marka_ts,vid_kolesa,radius,razmer,marka_rez,model_rez,sezon,
-                                    sost_disk,sost_rez,sost_disk_prich,sost_rez_prich,por_nomer_diska,por_nomer_rezina,message_link,type)
-    status_code = resp.status_code
-    if status_code < 400:
-        if type == "check":
-            await message.answer('Ваша заявка на проверку готового колеса сформирована',
-                         reply_markup=types.ReplyKeyboardRemove())
-        else:
-            await message.answer('Ваша заявка на оформление повреждения сформирована',
-                         reply_markup=types.ReplyKeyboardRemove())
-    else:
-        await message.answer('При формировании заявки произошла ошибка')
-
-    if vid_kolesa == "Диск":
-        await state.finish()
-        return
-
-    if sost_disk == "Ок" and sost_rez == "Утиль":
-        await message.answer("Есть покрышка на замену:",reply_markup=getKeyboardStep1(key_sogl))
-        await DamageStates.WAIT_ZAMENA_POKRESHKA.set()
-        return
-    if sost_disk == "Ок" and sost_rez == "Ремонт":
-        await message.answer("Уточните какое колесо:",
-                             reply_markup=getKeyboardList(key_dir_kolesa))
-        await SborkaStates.WAIT_TYPE_KOLESA.set()
-        return
-    if vid_kolesa == "Только резина":
-        await message.answer("Тип диска:", reply_markup=getKeyboardStep1(key_type_disk))
-        await DamageStates.GAP2.set()
-        return
-    if sost_disk == "Ремонт" or sost_disk == "Утиль":
-        await message.answer("Есть другой диск на замену:", reply_markup=getKeyboardStep1(key_sogl))
-        await DamageStates.GAP3.set()
-        return
-        bot.register_next_step_handler(message, gap3)
-        return
-    await state.finish()
-
-def generating_report_tg(username,company,grz,type_disk,marka_ts,vid_kolesa,radius,razmer,marka_rez,model_rez,sezon,
-                         sost_disk,sost_rez,sost_disk_prich,sost_rez_prich,por_nomer_diska,por_nomer_rezina,type):
-    str_answer = ""
-    if type == "check":
-        str_answer = "Проверка готового колеса\n\n"
-    str_answer = str_answer + "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
-    if marka_ts!= "":
-        str_answer = str_answer + "🚗 " + str(marka_ts) + "\n"
-    if grz!= "":
-        str_answer = str_answer + "#️⃣ " + str(grz) + "\n"
-    str_answer = str_answer + "👷 @" + str(username) + "\n\n"
-    if type != "check":
-        str_answer = str_answer + "🛞 " + str(vid_kolesa) + "\n"
-    if str(vid_kolesa) == "Диск":
-        if radius:
-            str_answer = str_answer + "R" + str(radius) + "\n"
-    else:
-        str_answer = str_answer + str(marka_rez) + " " + str(model_rez) + "\n"
-        str_answer = str_answer + str(razmer) + "/" + str(radius) + "\n"
-        if str(sezon).split(' ')[0] == "Лето":
-            str_answer = str_answer + "☀️ " + str(sezon) + "\n"
-        elif str(sezon).split(' ')[0] == "Зима":
-            str_answer = str_answer + "❄️ " + str(sezon) + "\n"
-        else:
-            str_answer = str_answer + str(sezon) + "\n"
-    if type_disk!= "":
-        str_answer = str_answer + str(type_disk) + "\n\n"
-        str_answer = str_answer + "🛞 Состояние диска: \n" + "#" + str(sost_disk).replace(' ', '_') + "\n"
-    if sost_disk_prich!= "":
-        str_answer = str_answer + "#" + str(sost_disk_prich).replace(' ', '_') + "\n"
-    if sost_disk == "Утиль":
-        str_answer = str_answer + "#" + str(por_nomer_diska).replace(' ', '_') + "\n"
-    if str(vid_kolesa) != "Диск":
-        str_answer = str_answer + "\n🛞 Состояние резины: \n#" + str(sost_rez) + "\n"
-        str_answer = str_answer + "#" + str(sost_rez_prich).replace(' ', '_') + "\n"
-        if sost_rez == "Утиль":
-            str_answer = str_answer + "#" + str(por_nomer_rezina).replace(' ', '_') + "\n"
-    str_answer = str_answer + "#" + str(company) + "\n"
-    return str_answer
-
-def generating_report_google_sheets(username,company,grz,type_disk,marka_ts,vid_kolesa,radius,razmer,marka_rez,model_rez,sezon,
-                                        sost_disk,sost_rez,sost_disk_prich,sost_rez_prich,por_nomer_diska,por_nomer_rezina,message_link,type="",type_check=""):
-    count = 1
-    if type_check == "Ось":
-        count = 2
-    elif type_check == "Комплект":
-        count = 4
-    tlist = list()
-    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
-    tlist.append(company)
-    if type == "check":
-        tlist.append("Проверка колеса")
-    else:
-        tlist.append(vid_kolesa)
-    tlist.append(grz)
-    tlist.append(marka_ts)
-    tlist.append(radius)
-    tlist.append(razmer)
-    tlist.append(marka_rez)
-    tlist.append(model_rez)
-    tlist.append(sezon)
-    tlist.append(type_disk)
-    tlist.append(sost_disk)
-    tlist.append(sost_disk_prich)
-    tlist.append(por_nomer_diska)
-    tlist.append(sost_rez)
-    tlist.append(sost_rez_prich)
-    tlist.append(por_nomer_rezina)
-    tlist.append(message_link)  # ссылка на отчет
-    tlist.append(username)
-    for i in range(count):
-        try:
-            with_sheets_retry(
-                write_in_answers_ras,
-                tlist,
-                "Выгрузка ремонты/утиль",
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось записать данные в Выгрузка ремонты/утиль после 3 попыток")
-        try:
-            with_sheets_retry(
-                process_transfer_record,
-                tlist,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось записать данные в Остатки Бой после 3 попыток")
-
-@dp.message_handler(state=DamageStates.WAIT_ZAMENA_POKRESHKA)
-async def gap(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Нет":
-        await message.answer("Завершение формирования заявки",
-                         reply_markup=types.ReplyKeyboardRemove())
-        await state.finish()
-        return
-    elif message.text == "Да":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await SborkaStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=DamageStates.GAP2)
-async def gap2(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    await state.update_data(type_disk=message.text,type_sborka="sborka")
-
-    await message.answer("Уточните какое колесо:",
-                         reply_markup=getKeyboardList(key_dir_kolesa))
-    await SborkaStates.WAIT_TYPE_KOLESA.set()
-
-@dp.message_handler(state=DamageStates.GAP3)
-async def gap3(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Нет":
-        message.answer("Завершение формирования заявки",
-                         reply_markup=types.ReplyKeyboardRemove())
-        await state.finish()
-        return
-
-    elif message.text == "Да":
-        await message.answer("Тип диска:", reply_markup=getKeyboardStep1(key_type_disk))
-        await DamageStates.GAP2.set()
-
-@dp.message_handler(commands=["sborka", "sborka_ko"], state="*")
-async def cmd_sborka(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[sborka] User @{user.username} ({user.id}) начал оформление сборки")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username,type_sborka=message.text.split()[0][1:])
-    await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-    await SborkaStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=SborkaStates.WAIT_COMPANY)
-async def sborka_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    company=message.text
-    if str(company) in key_company:
-        await state.update_data(company=company)
-
-    else:
-        message.answer("Вы ввели компание не из списка. Повторите выбор:",
-                         reply_markup=getKeyboardStep1(key_company))
-        await SborkaStates.WAIT_COMPANY.set()
-        return
-
-    await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-    await SborkaStates.WAIT_TYPE_DISK.set()
-
-@dp.message_handler(state=SborkaStates.WAIT_TYPE_DISK)
-async def sborka_type_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-        await SborkaStates.WAIT_COMPANY.set()
-        return
-
-    type_disk = message.text
-    await state.update_data(type_disk=type_disk)
-
-
-    await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-    await SborkaStates.WAIT_RADIUS.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_RADIUS)
-async def sborka_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await SborkaStates.WAIT_TYPE_DISK.set()
-        return
-
-    radius = message.text
-    await state.update_data(radius=radius)
-
-
-    if not check_validation_radius(company,radius):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРадиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await SborkaStates.WAIT_RADIUS.set()
-        return
-
-    await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company,radius))))))
-    await SborkaStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_RAZMER)
-async def sborka_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад":
-        await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await SborkaStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-    await state.update_data(razmer=razmer)
-
-
-    if not check_validation_razmer(company, radius, razmer):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРазмер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company,radius))))))
-
-        await SborkaStates.WAIT_RAZMER.set()
-        return
-
-    await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-    await SborkaStates.WAIT_MARKA_REZ.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_MARKA_REZ)
-async def sborka_marka_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-
-    if message.text == "Назад":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await SborkaStates.WAIT_RAZMER.set()
-        return
-
-    marka_rez = message.text
-    await state.update_data(marka_rez=marka_rez)
-
-    if not check_validation_marka(company, radius, razmer, marka_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SborkaStates.WAIT_MARKA_REZ.set()
-        return
-
-    await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-    await SborkaStates.WAIT_MODEL_REZ.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_MODEL_REZ)
-async def sborka_model_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SborkaStates.WAIT_MARKA_REZ.set()
-        return
-
-    model_rez = message.text
-    await state.update_data(model_rez=model_rez)
-
-    if not check_validation_model(company, radius, razmer, marka_rez, model_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМодель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await SborkaStates.WAIT_MODEL_REZ.set()
-        return
-
-    await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-    await SborkaStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=SborkaStates.WAIT_SEZON)
-async def sborka_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await SborkaStates.WAIT_MODEL_REZ.set()
-        return
-
-    sezon = message.text
-    await state.update_data(sezon=sezon)
-
-    if not check_validation_sezon(company, radius, razmer, marka_rez, model_rez,sezon):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await SborkaStates.WAIT_SEZON.set()
-        return
-
-    await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-    await SborkaStates.WAIT_MARKA_TS.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_MARKA_TS)
-async def sborka_marka_ts(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    type_sborka = data.get("type_sborka", "")
-
-    if message.text == "Назад":
-        await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await SborkaStates.WAIT_SEZON.set()
-        return
-
-    marka_ts = message.text
-    await state.update_data(marka_ts=marka_ts)
-
-    if not check_validation_marka_ts(company, marka_ts):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SborkaStates.WAIT_MARKA_TS.set()
-        return
-
-    if type_sborka == "sborka":
-        await message.answer("Уточните какое колесо:",
-                         reply_markup=getKeyboardList(key_dir_kolesa))
-    else:
-        await message.answer("Вид сборки:",
-                         reply_markup=getKeyboardList(key_type_sborka))
-    await SborkaStates.WAIT_TYPE_KOLESA.set()
-
-@dp.message_handler(state=SborkaStates.WAIT_TYPE_KOLESA)
-async def sborka_type_kolesa(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SborkaStates.WAIT_MARKA_TS.set()
-        return
-
-    type_kolesa = message.text
-    await state.update_data(type_kolesa=type_kolesa)
-
-    await message.answer("Сбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-    await SborkaStates.WAIT_ZAYAVKA.set()
-
-@dp.message_handler(state=SborkaStates.WAIT_ZAYAVKA)
-async def sborka_zayavka(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sezon = data.get("sezon", "")
-    marka_ts = data.get("marka_ts", "")
-    type_sborka = data.get("type_sborka", "")
-    type_disk = data.get("type_disk", "")
-    type_kolesa = data.get("type_kolesa", "")
-
-    if message.text == "Назад":
-        if type_sborka == "sborka":
-            await message.answer("Уточните какое колесо:",
-                                 reply_markup=getKeyboardList(key_dir_kolesa))
-        else:
-            await message.answer("Вид сборки:",
-                                 reply_markup=getKeyboardList(key_type_sborka))
-        await SborkaStates.WAIT_TYPE_KOLESA.set()
-        return
-
-    zayavka = message.text
-    await state.update_data(zayavka=zayavka)
-
-    if str(zayavka) == "Да":
-        try:
-            if type_sborka == "sborka":
-                list_sborki = with_sheets_retry(
-                    nomer_sborka,
-                    company, radius, razmer, marka_rez,
-                    model_rez, sezon, marka_ts, type_disk, type_kolesa,
-                    max_attempts=5, base_delay=2
-                )
-            else:
-                list_sborki = with_sheets_retry(
-                    nomer_sborka_ko,
-                    company, radius, razmer, marka_rez,
-                    model_rez, sezon, marka_ts, type_disk, type_kolesa,
-                    max_attempts=5, base_delay=2
-                )
-        except RuntimeError:
-            logger.error("Не удалось получить номер сборки после 5 попыток")
-            return await message.answer(
-                "Не удалось получить номер заявки. Попробуйте чуть позже."
-            )
-        if not list_sborki:
-            await message.answer("Не найдена сборка, подходящая под введенные параметры\nСбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-            await SborkaStates.WAIT_ZAYAVKA.set()
-            return
-        await message.answer("Номера актуальных заказов:",
-                             reply_markup=getKeyboardList(list_sborki))
-        await SborkaStates.WAIT_NOMER_ZAYAVKA.set()
-        return
-
-    await message.answer("Прикрепите от 1 до 4 фото в одном сообщение. И нажмите на кнопку Готово",
-                 reply_markup=_keyboard_done_exit())
-    await SborkaStates.WAIT_FILES.set()
-
-
-@dp.message_handler(state=SborkaStates.WAIT_NOMER_ZAYAVKA)
-async def sborka_nomer_sborka(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sezon = data.get("sezon", "")
-    marka_ts = data.get("marka_ts", "")
-    type_disk = data.get("type_disk", "")
-    type_kolesa = data.get("type_kolesa", "")
-    type_sborka = data.get("type_sborka", "")
-
-    if message.text == "Назад":
-        await message.answer("Сбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-        await SborkaStates.WAIT_ZAYAVKA.set()
-        return
-
-    nomer_sborka_in = message.text
-
-    if type_sborka =="sborka_ko" and str(nomer_sborka_in) in nomer_sborka_ko(company,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa):
-        await state.update_data(nomer_sborka=nomer_sborka_in)
-
-        await message.answer("Прикрепите от 1 до 4 фото в одном сообщение. И нажмите на кнопку Готово",
-                             reply_markup=getKeyboardList(key_ready))
-        await SborkaStates.WAIT_FILES.set()
-        return
-
-    if str(nomer_sborka_in) in nomer_sborka(company,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa):
-        await state.update_data(nomer_sborka=nomer_sborka_in)
-
-        await message.answer("Прикрепите от 1 до 4 фото в одном сообщение. И нажмите на кнопку Готово",
-                             reply_markup=getKeyboardList(key_ready))
-        await SborkaStates.WAIT_FILES.set()
-        return
-
-    await message.answer("Сбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-    await SborkaStates.WAIT_ZAYAVKA.set()
-
-@dp.message_handler(
-    content_types=[ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO],
-    state=SborkaStates.WAIT_FILES
-)
-async def collect_files_sborka(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    # Определяем тип и file_id
-    if message.photo:
-        file_type = 'photo'
-        file_id = message.photo[-1].file_id
-    elif message.document:
-        file_type = 'document'
-        file_id = message.document.file_id
-    elif message.video:
-        file_type = 'video'
-        file_id = message.video.file_id
-    else:
-        return  # неожиданный content_type
-
-    files.append({'type': file_type, 'media': file_id})
-    await state.update_data(files=files)
-
-@dp.message_handler(lambda msg: msg.text == "Назад", state=SborkaStates.WAIT_FILES)
-async def files_nazad_sborka(message: types.Message, state: FSMContext):
-    await message.answer("Сбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-    await SborkaStates.WAIT_ZAYAVKA.set()
-    return
-
-
-@dp.message_handler(lambda msg: msg.text == "Готово", state=SborkaStates.WAIT_FILES)
-async def finalize_sborka(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    if not 1 <= len(files) <= 4:
-        return await message.answer("Нужно прикрепить от 1 до 4 файлов")
-
-    username = data.get("username", "")
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sezon = data.get("sezon", "")
-    marka_ts = data.get("marka_ts", "")
-    type_sborka = data.get("type_sborka", "")
-    type_disk = data.get("type_disk", "")
-    type_kolesa = data.get("type_kolesa", "")
-    type_check = data.get("type_kolesa", "")
-    nomer_sborka = data.get("nomer_sborka", "")
-    zayavka = data.get("zayavka", "")
-    type = data.get("type", "")
-
-    if type_sborka == "sborka":
-        update_data_sborka(marka_rez, model_rez,type_disk, type_kolesa, nomer_sborka)
-
-    files[0]['caption'] = generating_report_tg_sborka(company,username,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa,nomer_sborka,zayavka, type, type_check)
-    if company == "СитиДрайв":
-        chatId = chat_id_sborka_Sity
-        chat_id_for_link = link_sborka_Sity
-        thread_id = thread_id_sborka_Sity
-    elif company == "Яндекс":
-        chatId = chat_id_sborka_Yandex
-        chat_id_for_link = link_sborka_Yandex
-        thread_id = thread_id_sborka_Yandex
-    else:
-        chatId = chat_id_sborka_Belka
-        chat_id_for_link = link_sborka_Belka
-        thread_id = thread_id_sborka_Belka
-    dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(files)}
-    resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
-    data = resp.json()
-    message_id = data["result"][0]["message_id"]
-    message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
-    status_code = resp.status_code
-    if type != "check":
-        generating_report_google_sheets_sborka(company,username,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa,message_link,nomer_sborka,zayavka)
-    if len(nomer_sborka) and str(nomer_sborka) != "не найден":
-        try:
-            with_sheets_retry(
-                update_record_sborka,
-                company,username,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa,message_link,nomer_sborka,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось обновить данные в сборке после 3 попыток")
-        await print_zayavka()
-    elif str(nomer_sborka) == "не найден":
-        await message.answer('По Вашей сборке не найдена заявка')
-    if status_code < 400:
-        await message.answer('Ваше заявка сформирована')
-    else:
-        await message.answer('При формировании заявки произошла ошибка')
-    await state.finish()
-
-
-def generating_report_tg_sborka(company,username,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa,nomer_sborka,zayavka, type, type_check=""):
-    str_answer = " "
-    if type == "check":
-        if type_check == "Ось":
-            str_answer = str_answer + "Проверка готовой оси\n\n"
-        elif type_check == "Комплект":
-            str_answer = str_answer + "Проверка готового комплекта\n\n"
-        else:
-            str_answer = str_answer + "Проверка готового колеса\n\n"
-    str_answer = str_answer + "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
-    str_answer = str_answer + "👷 @" + str(username) + "\n\n"
-    str_answer = str_answer + "🚗 " + str(marka_ts) + "\n\n"
-    str_answer = str_answer + "🛞 " + str(marka_rez) + " " + str(model_rez) + "\n\n"
-    str_answer = str_answer + str(razmer) + "/" + str(radius) + "\n"
-    if str(sezon).split(' ')[0] == "Лето":
-        str_answer = str_answer + "☀️ " + str(sezon) + "\n"
-    elif str(sezon).split(' ')[0] == "Зима":
-        str_answer = str_answer + "❄️ " + str(sezon) + "\n"
-    else:
-        str_answer = str_answer + str(sezon) + "\n"
-    str_answer = str_answer + str(type_disk) + "\n"
-    if str(type_kolesa) == "Левое":
-        str_answer = str_answer + "⬅️ " + str(type_kolesa) + "\n"
-    elif str(type_kolesa) == "Правое":
-        str_answer = str_answer + "➡️ " + str(type_kolesa) + "\n"
-    elif str(type_kolesa) == "Ось":
-        str_answer = str_answer + "↔️ " + str(type_kolesa) + "\n"
-    elif str(type_kolesa) == "Комплект":
-        str_answer = str_answer + "🔄 " + str(type_kolesa) + "\n"
-    str_answer = str_answer + "\n#" + str(company) + "\n"
-    str_answer = str_answer + "\n📝 Сбор под заявку: " + str(zayavka) + "\n"
-    if len(str(nomer_sborka)) > 1:
-        str_answer = str_answer + "\n#️⃣ Номер заявки: " + str(nomer_sborka) + "\n"
-    return str_answer
-
-
-
-def generating_report_google_sheets_sborka(company,username,radius,razmer,marka_rez,model_rez,sezon,marka_ts,type_disk,type_kolesa,message_link,nomer_sborka,zayavka):
-    tlist = []
-    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
-    tlist.append(company)
-    tlist.append(marka_ts)
-    tlist.append(radius)
-    tlist.append(razmer)
-    tlist.append(marka_rez)
-    tlist.append(model_rez)
-    tlist.append(sezon)
-    tlist.append(type_disk)
-    tlist.append(type_kolesa)
-    tlist.append(zayavka)
-    tlist.append(nomer_sborka)
-    tlist.append(message_link)  # ссылка на отчёт
-    tlist.append(username)
-
-    pos = type_kolesa
-    if pos not in ("Комплект", "Ось"):
-        try:
-            with_sheets_retry(
-                write_in_answers_ras,
-                tlist,
-                "Выгрузка сборка",
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось записать данные в Выгрузка сборка после 3 попыток")
-        try:
-            with_sheets_retry(
-                write_in_answers_ras,
-                tlist,
-                "Онлайн остатки Хаба",
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось записать данные в Онлайн остатки Хаба после 3 попыток")
-    else:
-        if pos == "Комплект":
-            for side, count in (("Правое", 2), ("Левое", 2)):
-                for _ in range(count):
-                    new_list = tlist.copy()
-                    new_list[9] = side
-                    try:
-                        with_sheets_retry(
-                            write_in_answers_ras,
-                            new_list,
-                            "Выгрузка сборка",
-                            max_attempts=3,
-                            base_delay=2
-                        )
-                    except RuntimeError:
-                        logger.error("Не удалось записать данные в Выгрузка сборка после 3 попыток")
-                    try:
-                        with_sheets_retry(
-                            write_in_answers_ras,
-                            new_list,
-                            "Онлайн остатки Хаба",
-                            max_attempts=3,
-                            base_delay=2
-                        )
-                    except RuntimeError:
-                        logger.error("Не удалось записать данные в Онлайн остатки Хаба после 3 попыток")
-        elif pos == "Ось":
-            for side in ("Правое", "Левое"):
-                new_list = tlist.copy()
-                new_list[9] = side
-                try:
-                    with_sheets_retry(
-                        write_in_answers_ras,
-                        new_list,
-                        "Выгрузка сборка",
-                        max_attempts=3,
-                        base_delay=2
-                    )
-                except RuntimeError:
-                    logger.error("Не удалось записать данные в Выгрузка сборка после 3 попыток")
-                try:
-                    with_sheets_retry(
-                        write_in_answers_ras,
-                        new_list,
-                        "Онлайн остатки Хаба",
-                        max_attempts=3,
-                        base_delay=2
-                    )
-                except RuntimeError:
-                    logger.error("Не удалось записать данные в Онлайн остатки Хаба после 3 попыток")
-
-@dp.message_handler(commands=["soberi"], state="*")
-async def cmd_soberi(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[soberi] User @{user.username} ({user.id}) начал оформление заявки на сборку")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
-    await message.answer("Укажите, что собираем:", reply_markup=getKeyboardStep1(key_object))
-    await SoberiStates.WAIT_TYPE_SOBERI.set()
-
-@dp.message_handler(commands=["soberi_belka"], state="*")
-async def cmd_soberi_belka(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    # if message.from_user.id not in list_users_belka:
-    #     return await message.answer("У вас нет прав для вызова данной команды")
-
-    user = message.from_user
-    logger.info(f"[soberi_belka] User @{user.username} ({user.id}) начал оформление заявки на сборку Белка")
-
-    await state.finish()
-    # фиксируем компанию и флаг preset_company, чтобы ниже хендлеры знали, что шаг компании пропущен
-    await state.update_data(user_id=user.id, username=user.username, company="Белка", preset_company=True)
-    await message.answer("Укажите, что собираем:", reply_markup=getKeyboardStep1(key_object))
-    await SoberiStates.WAIT_TYPE_SOBERI.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_TYPE_SOBERI)
-async def soberi_type_soberi(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    await state.update_data(type_soberi=message.text)
-    data = await state.get_data()
-    if data.get("preset_company"):
-        company = data.get("company", "Белка")
-        await message.answer(
-            "Марка автомобиля:",
-            reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company)))))
-        )
-        return await SoberiStates.WAIT_MARKA_TS.set()
-    # Обычный сценарий — просим выбрать компанию
-    await message.answer("Компания:", reply_markup=getKeyboardList(key_company_small))
-    await SoberiStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_COMPANY)
-async def soberi_type_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Укажите, что собираем:", reply_markup=getKeyboardStep1(key_object))
-        await SoberiStates.WAIT_TYPE_SOBERI.set()
-        return
-
-    company = message.text
-    await state.update_data(company=company)
-
-    await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-    await SoberiStates.WAIT_MARKA_TS.set()
-
-
-@dp.message_handler(state=SoberiStates.WAIT_MARKA_TS)
-async def soberi_marka_ts(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        data = await state.get_data()
-        if data.get("preset_company"):
-            await message.answer("Укажите, что собираем:", reply_markup=getKeyboardStep1(key_object))
-            await SoberiStates.WAIT_TYPE_SOBERI.set()
-            return
-        await message.answer("Компания:", reply_markup=getKeyboardList(key_company_small))
-        await SoberiStates.WAIT_COMPANY.set()
-        return
-
-    marka_ts = message.text
-    await state.update_data(marka_ts=marka_ts)
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    type_soberi = data.get("type_soberi", "")
-
-    if not check_validation_marka_ts(company, marka_ts):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SoberiStates.WAIT_MARKA_TS.set()
-        return
-
-    if type_soberi == "Комплект":
-        await message.answer("Радиус:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await SoberiStates.WAIT_RADIUS.set()
-    else:
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await SoberiStates.WAIT_TYPE_DISK.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_TYPE_DISK)
-async def soberi_type_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SoberiStates.WAIT_MARKA_TS.set()
-        return
-
-    await state.update_data(type_disk=message.text)
-
-    await message.answer("Радиус:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-    await SoberiStates.WAIT_RADIUS.set()
-
-
-@dp.message_handler(state=SoberiStates.WAIT_RADIUS)
-async def soberi_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    type_soberi = data.get("type_soberi", "")
-
-    if message.text == "Назад" and type_soberi == "Комплект":
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SoberiStates.WAIT_MARKA_TS.set()
-        return
-    elif message.text == "Назад" and (type_soberi == "Ось" or type_soberi == "Колесо"):
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await SoberiStates.WAIT_TYPE_DISK.set()
-        return
-
-    radius = message.text
-    await state.update_data(radius=radius)
-
-    if not check_validation_radius(company, radius):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРадиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await SoberiStates.WAIT_RADIUS.set()
-        return
-
-    await message.answer("Размер:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-    await SoberiStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=SoberiStates.WAIT_RAZMER)
-async def soberi_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    type_soberi = data.get("type_soberi", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад" and type_soberi == "Комплект":
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SoberiStates.WAIT_MARKA_TS.set()
-        return
-    elif message.text == "Назад" and (type_soberi == "Ось" or type_soberi == "Колесо"):
-        await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await SoberiStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-    await state.update_data(razmer=razmer)
-
-    if not check_validation_razmer(company, radius, razmer):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРазмер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await SoberiStates.WAIT_RAZMER.set()
-        return
-
-    if type_soberi == "Колесо":
-        await message.answer("Марка резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SoberiStates.WAIT_MARKA_REZ.set()
-    else:
-        await message.answer("Сезонность резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer,"", "", 1))))))
-        await SoberiStates.WAIT_SEZON.set()
-
-
-@dp.message_handler(state=SoberiStates.WAIT_MARKA_REZ)
-async def soberi_marka_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    razmer = data.get("razmer", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await SoberiStates.WAIT_RAZMER.set()
-        return
-
-    marka_rez = message.text
-    await state.update_data(marka_rez=marka_rez)
-
-    if not check_validation_marka(company, radius, razmer, marka_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SoberiStates.WAIT_MARKA_REZ.set()
-        return
-    await message.answer("Модель резины:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-    await SoberiStates.WAIT_MODEL_REZ.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_MODEL_REZ)
-async def soberi_model_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    razmer = data.get("razmer", "")
-    radius = data.get("radius", "")
-    marka_rez = data.get("marka_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SoberiStates.WAIT_MARKA_REZ.set()
-        return
-
-    model_rez = message.text
-    await state.update_data(model_rez=model_rez)
-
-    if not check_validation_model(company, radius, razmer, marka_rez, model_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМодель резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SoberiStates.WAIT_MARKA_REZ.set()
-        return
-
-    await message.answer("Сезонность резины:",
-                         reply_markup=getKeyboardList(
-                             sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-    await SoberiStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_SEZON)
-async def soberi_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    type_soberi = data.get("type_soberi", "")
-    razmer = data.get("razmer", "")
-    radius = data.get("radius", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад" and type_soberi == "Колесо":
-        await message.answer("Марка резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await SoberiStates.WAIT_MARKA_REZ.set()
-        return
-    elif message.text == "Назад" and (type_soberi == "Ось" or type_soberi == "Комплект"):
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await SoberiStates.WAIT_RAZMER.set()
-        return
-
-    sezon = message.text
-    await state.update_data(sezon=sezon)
-
-    if (type_soberi == "Ось" or type_soberi == "Комплект") and not check_validation_sezon(company, radius, razmer, marka_rez, model_rez, sezon, 1):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                                 reply_markup=getKeyboardList(
-                                     sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await SoberiStates.WAIT_SEZON.set()
-        return
-    if type_soberi == "Колесо" and not check_validation_sezon(company, radius, razmer, marka_rez, model_rez, sezon):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                                 reply_markup=getKeyboardList(
-                                     sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await SoberiStates.WAIT_SEZON.set()
-        return
-    if type_soberi == "Комплект":
-        await message.answer("Количество комплектов:", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_1.set()
-        return
-    elif type_soberi == "Ось":
-        await message.answer("Количество осей:", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_1.set()
-        return
-    else:
-        await message.answer("Уточните количество левых колес:", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_1.set()
-        return
-
-@dp.message_handler(state=SoberiStates.WAIT_COUNT_1)
-async def soberi_count_1(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    type_soberi = data.get("type_soberi", "")
-    razmer = data.get("razmer", "")
-    radius = data.get("radius", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Сезонность резины:",
-                                 reply_markup=getKeyboardList(
-                                     sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await SoberiStates.WAIT_SEZON.set()
-        return
-    try:
-        count_1 = int(message.text)
-        await state.update_data(count_1=count_1)
-
-    except Exception as e:
-        await message.answer("Неверный формат целого числа. Попробуйте снова", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_1.set()
-        return
-
-    if type_soberi == "Комплект" or type_soberi == "Ось":
-        await _soberi_ask_comment(message, state)
-        return
-    else:
-        await message.answer("Уточните количество правых колес:", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_2.set()
-
-
-@dp.message_handler(state=SoberiStates.WAIT_COUNT_2)
-async def soberi_count_2(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Уточните количество левых колес:", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_1.set()
-        return
-    try:
-        count_2 = int(message.text)
-        await state.update_data(count_2=count_2)
-
-    except Exception as e:
-        await message.answer("Неверный формат целого числа. Попробуйте снова", reply_markup=getKeyboardList(key_chisla))
-        await SoberiStates.WAIT_COUNT_2.set()
-        return
-
-    await _soberi_ask_comment(message, state)
-    return
-
-def _keyboard_comment_skip_exit():
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    kb.add("Пропустить")
-    kb.add("Выход")
-    return kb
-
-async def _soberi_ask_comment(message: types.Message, state: FSMContext):
-    await message.answer(
-        "Комментарий (можно пропустить):",
-        reply_markup=_keyboard_comment_skip_exit()
-    )
-    await SoberiStates.WAIT_COMMENT.set()
-
-@dp.message_handler(state=SoberiStates.WAIT_COMMENT)
-async def soberi_comment(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    text = (message.text or "").strip()
-    if text.lower() == "пропустить":
-        comment = ""
-    else:
-        comment = text
-
-    await state.update_data(comment=comment)
-
-    # Финализация: запись в GS + уведомление
-    await generating_report_soberi(message, state)
-    await message.answer(
-        "Заявка на сборку оформлена",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    await print_zayavka()
-    await state.finish()
-    return
-
-async def generating_report_soberi(message: types.Message, state: FSMContext):
-    sum_list = []
-    data = await state.get_data()
-    type_soberi = data.get("type_soberi", "")
-    count_1 = data.get("count_1", "")
-    count_2 = data.get("count_2", "")
-    if type_soberi == "Колесо":
-        left = count_1
-        right = count_2
-        try:
-            nomer = with_sheets_retry(
-                get_max_nomer_sborka,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось получить номер сборки после 3 попыток")
-            return await message.answer(
-                "Не удалось получить номер сборки . Попробуйте чуть позже."
-            )
-        nomer = nomer + 1
-        while left:
-            row = await generating_report_google_sheets_soberi(message, state, "Левое", "sb"+ str(nomer))
-            sum_list.append(row)
-            nomer = nomer + 1
-            left = left - 1
-        while right:
-            row = await generating_report_google_sheets_soberi(message, state, "Правое", "sb"+ str(nomer))
-            sum_list.append(row)
-            nomer = nomer + 1
-            right = right - 1
-    elif type_soberi == "Комплект":
-        komplekt = count_1
-        try:
-            nomer = with_sheets_retry(
-                get_max_nomer_sborka,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось получить номер сборки после 3 попыток")
-            return await message.answer(
-                "Не удалось получить номер сборки . Попробуйте чуть позже."
-            )
-        nomer = nomer + 1
-        while komplekt:
-            left = 2
-            right = 2
-            while left:
-                row = await generating_report_google_sheets_soberi(message, state, "Левое", "sb" + str(nomer))
-                sum_list.append(row)
-                left = left - 1
-            while right:
-                row = await generating_report_google_sheets_soberi(message, state, "Правое", "sb" + str(nomer))
-                sum_list.append(row)
-                right = right - 1
-            komplekt = komplekt - 1
-            nomer = nomer + 1
-    else:
-        osi = count_1
-        try:
-            nomer = with_sheets_retry(
-                get_max_nomer_sborka,
-                max_attempts=3,
-                base_delay=2
-            )
-        except RuntimeError:
-            logger.error("Не удалось получить номер сборки после 3 попыток")
-            return await message.answer(
-                "Не удалось получить номер сборки . Попробуйте чуть позже."
-            )
-        nomer = nomer + 1
-        while osi:
-            row = await generating_report_google_sheets_soberi(message, state, "Левое", "sb" + str(nomer))
-            sum_list.append(row)
-            row = await generating_report_google_sheets_soberi(message, state, "Правое", "sb" + str(nomer))
-            sum_list.append(row)
-            osi = osi - 1
-            nomer = nomer + 1
-    try:
-        with_sheets_retry(
-            write_soberi_in_google_sheets_rows,
-            sum_list,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось сделать запись в Гугл Таблицу после 3 попыток")
-        return await message.answer(
-            "Не удалось сделать запись в Гугл Таблицу. Попробуйте чуть позже."
-        )
-
-
-async def generating_report_google_sheets_soberi(message: types.Message, state: FSMContext, position,nomer):
-    data = await state.get_data()
-    tlist = list()
-    tlist.append("")
-    tlist.append("")
-    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
-    tlist.append(data.get("company", ""))
-    tlist.append(data.get("marka_ts", ""))
-    tlist.append(data.get("radius", ""))
-    tlist.append(data.get("razmer", ""))
-    tlist.append(data.get("marka_rez", ""))
-    tlist.append(data.get("model_rez", ""))
-    tlist.append(data.get("sezon", ""))
-    tlist.append(data.get("type_disk", ""))
-    tlist.append(position)
-    tlist.append("")
-    tlist.append(nomer)
-    tlist.append(data.get("username", ""))
-    tlist.append("")
-    tlist.append("")
-    tlist.append("")
-    tlist.append("")
-    tlist.append(data.get("comment", ""))
-    return tlist
-
-@dp.message_handler(commands=["demounting"], state="*")
-async def cmd_demounting(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[demounting] User @{user.username} ({user.id}) начал оформление заявки на демонтаж")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
-    await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-    await DemountingStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_COMPANY)
-async def demounting_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    company = message.text
-    if str(company) in key_company:
-        await state.update_data(company=company)
-    else:
-        await message.answer("Вы ввели компание не из списка. Повторите выбор:",
-                         reply_markup=getKeyboardStep1(key_company))
-        await DemountingStates.WAIT_COMPANY.set()
-        return
-
-    await message.answer("Сколько колес демонтируется:",
-                             reply_markup=getKeyboardList(key_count))
-    await DemountingStates.WAIT_COUNT.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_COUNT)
-async def demounting_count(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-        await DemountingStates.WAIT_COMPANY.set()
-        return
-
-    count = message.text
-    await state.update_data(count=count)
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-    await DemountingStates.WAIT_MARKA_TS.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_MARKA_TS)
-async def demounting_marka_ts(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Сколько колес демонтируется:",
-                             reply_markup=getKeyboardList(key_count))
-        await DemountingStates.WAIT_COUNT.set()
-
-    marka_ts = message.text
-    await state.update_data(marka_ts=marka_ts)
-
-    if not check_validation_marka_ts(company, marka_ts):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await DemountingStates.WAIT_MARKA_TS.set()
-        return
-
-    await message.answer("Радиус:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-    await DemountingStates.WAIT_RADIUS.set()
-
-
-@dp.message_handler(state=DemountingStates.WAIT_RADIUS)
-async def demounting_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await DemountingStates.WAIT_MARKA_TS.set()
-        return
-
-    radius = message.text
-    await state.update_data(radius=radius)
-
-    if not check_validation_radius(company, radius):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРадиус:",
-                     reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DemountingStates.WAIT_MARKA_TS.set()
-        return
-
-    await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-    await DemountingStates.WAIT_RAZMER.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_RAZMER)
-async def demounting_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад":
-        await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await DemountingStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-    await state.update_data(razmer=razmer)
-
-    if not check_validation_razmer(company, radius, razmer):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРазмер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await DemountingStates.WAIT_RAZMER.set()
-        return
-
-    await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-    await DemountingStates.WAIT_MARKA_REZ.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_MARKA_REZ)
-async def demounting_marka_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-
-    if message.text == "Назад":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await DemountingStates.WAIT_RAZMER.set()
-        return
-
-    marka_rez = message.text
-    await state.update_data(marka_rez=marka_rez)
-
-    if not check_validation_marka(company, radius, razmer, marka_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await DemountingStates.WAIT_MARKA_REZ.set()
-        return
-
-    await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-    await DemountingStates.WAIT_MODEL_REZ.set()
-
-#
-@dp.message_handler(state=DemountingStates.WAIT_MODEL_REZ)
-async def demounting_model_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await DemountingStates.WAIT_MARKA_REZ.set()
-        return
-
-    model_rez = message.text
-    await state.update_data(model_rez=model_rez)
-
-    if not check_validation_model(company, radius, razmer, marka_rez, model_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМодель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await DemountingStates.WAIT_MODEL_REZ.set()
-        return
-
-    await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-    await DemountingStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=DemountingStates.WAIT_SEZON)
-async def demounting_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await DemountingStates.WAIT_MODEL_REZ.set()
-        return
-
-    sezon = message.text
-    await state.update_data(sezon=sezon)
-
-    if not check_validation_sezon(company, radius, razmer, marka_rez, model_rez, sezon):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await DemountingStates.WAIT_SEZON.set()
-        return
-
-    await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-    await DemountingStates.WAIT_TYPE_DISK.set()
-
-
-@dp.message_handler(state=DemountingStates.WAIT_TYPE_DISK)
-async def demounting_type_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await DemountingStates.WAIT_SEZON.set()
-        return
-
-    type_disk = message.text
-    await state.update_data(type_disk=type_disk)
-
-    await generating_report_google_sheets_gen(message, state)
-    await message.answer("Демонтаж оформлен", reply_markup = types.ReplyKeyboardRemove())
-
-async def generating_report_google_sheets_gen(message: types.Message, state: FSMContext):
-    tlist = list()
-    data = await state.get_data()
-    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
-    tlist.append(data.get("company", ""))
-    tlist.append("")
-    tlist.append("")
-    tlist.append(data.get("marka_ts", ""))
-    tlist.append(data.get("radius", ""))
-    tlist.append(data.get("razmer", ""))
-    tlist.append(data.get("marka_rez", ""))
-    tlist.append(data.get("model_rez", ""))
-    tlist.append(data.get("sezon", ""))
-    tlist.append(data.get("type_disk", ""))
-    tlist.append("")
-    tlist.append("")
-    tlist.append("")
-    tlist.append("Демонтаж")
-    tlist.append("")
-    tlist.append("")
-    tlist.append("")  # ссылка на отчет
-    tlist.append(data.get("username", ""))
+@bot.message_handler(commands=['update_data'])
+def update_data(message):
     count = 0
-    if data.get("count", "") == "1 колесо":
-        count = 1
-    elif data.get("count", "") == "Ось":
-        count = 2
-    elif data.get("count", "") == "Комплект":
-        count = 4
-    for  _ in range(count):
+    for i, record in enumerate(list_users):
+        if record == message.from_user.id:
+            bot.send_message(message.chat.id, "Обновление списков началось")
+            loading_grz_is_Google_Sheets()
+            count = count + 1
+    if count == 0:
+        bot.send_message(message.chat.id, "У вас нет прав для вызова данной команды")
+
+@bot.message_handler(commands=['print_move'])
+def print_move(message):
+    global users_with_cache
+
+    for idx, user_id in enumerate(users_with_cache):
+        user_tag = f"<a href='tg://user?id={user_id}'>Пользователь {idx}</a>"
+        bot.send_message(message.chat.id, user_tag, parse_mode="HTML")
+
+
+@bot.message_handler(commands=['move'])
+def move(message):
+    global mvrecords, users_with_cache
+    global mvrecords
+    for i, record in enumerate(mvrecords):
+        if record[0] == message.from_user.id:
+            mvrecords.remove(record)
+            if message.from_user.id in users_with_cache:
+                release_cache(message.from_user.id)
+    if int(message.chat.id) > 0:
+        tlist = list()
         try:
-            with_sheets_retry(
-                write_in_answers_ras,
-                tlist,
-                "Выгрузка ремонты/утиль",
-                max_attempts=3,
-                base_delay=2
+            resp = requests.get(urlSmallDtp, params={"tg_chat_id": str(message.from_user.id)}, timeout=15, verify=False)
+            rep = resp.json()
+            tlist.append(message.from_user.id)
+            tlist.append(message.from_user.username)
+            tlist.append(rep['user']['fullname'])
+            mvrecords.append(tlist)
+            acquire_cache(user_id=message.from_user.id)
+            step1_move(message)
+        except Exception as e:
+            logging.exception(e)
+            bot.send_message(message.chat.id, "Возникла ошибка чтения Ваших данных из базы КК. Убедитесь, что Вы успешно прошли регистрацию и повторите попытку оформления заявки. Регистрация производится по команде /start \nПри повторном возникновении ошибки обратитесь к разработчикам")
+    else:
+        bot.reply_to(message, "Перейдите в личные сообщение с ботом для оформления заявки",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
+
+def step1_move(message):
+    global mvrecords
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            bot.send_message(message.chat.id, "ГРЗ технички (можно ввести вручную):", reply_markup=getKeyboardStep1(grz_tech))
+            bot.register_next_step_handler(message, step2_move)
+
+def step2_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if not nazad:
+                plate_raw = (message.text or "").strip()
+                record.append(plate_raw.upper())
+                is_known = bool(check_validation_grz_tech(record, Mv.GRZ_TECH))
+                is_formatted = _is_plate_format(record[Mv.GRZ_TECH])
+                if not (is_known or is_formatted):
+                    postpone_build(message, record, 2)
+                    return
+            bot.send_message(message.chat.id, "Действие:", reply_markup=getKeyboardList(key_action))
+            bot.register_next_step_handler(message, step3_move)
+
+def step3_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                mvrecords.remove(record)
+                move(message)
+                return
+            if not nazad:
+                record.append(message.text)
+            if str(record[Mv.TYPE_ACTION]) == "Передаете в техничку":
+                bot.send_message(message.chat.id, "Кому передаете:", reply_markup=getKeyboardList(grz_tech))
+                bot.register_next_step_handler(message, step4_move)
+            else:
+                bot.send_message(message.chat.id, "Компания:", reply_markup=getKeyboardList(key_company))
+                bot.register_next_step_handler(message, step5_move)
+
+def step4_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step2_move(message, 1)
+                return
+            if not nazad:
+                plate_raw = (message.text or "").strip()
+                record.append(plate_raw.upper())
+                is_known = bool(check_validation_grz_tech(record, Mv.GRZ_PEREDACHA))
+                is_formatted = _is_plate_format(record[Mv.GRZ_PEREDACHA])
+                if not (is_known or is_formatted):
+                    postpone_build(message, record, 2)
+                    return
+            bot.send_message(message.chat.id, "Компания:", reply_markup=getKeyboardList(key_company))
+            bot.register_next_step_handler(message, step5_move)
+
+def step5_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0 and (str(record[Mv.TYPE_ACTION]) == "Забираете со склада" or str(record[Mv.TYPE_ACTION]) == "Сдаете бой"):
+                record.pop(len(record) - 1)
+                step2_move(message, 1)
+                return
+            if message.text == "Назад" and nazad == 0 and str(record[Mv.TYPE_ACTION]) == "Передаете в техничку":
+                record.pop(len(record) - 1)
+                step3_move(message, 1)
+                return
+            if not nazad:
+                if str(record[Mv.TYPE_ACTION]) == "Забираете со склада" or str(record[Mv.TYPE_ACTION]) == "Сдаете бой":
+                    record.append("")
+                record.append(message.text)
+            if str(record[Mv.TYPE_ACTION]) == "Забираете со склада":
+                # ВАЖНО: для сценария "Забираете со склада" всегда подтягиваем свежие данные
+                # из Google Sheets непосредственно перед выбором типа/позиции.
+                # Это гарантирует, что дальнейшие варианты будут построены по актуальному состоянию Хаба.
+                try:
+                    load_xab_cache()  # форс-обновление global_xab_cache
+                    # отметим активность пользователя, чтобы не "отпустить" кэш раньше времени
+                    users_with_cache[message.from_user.id] = time.time()
+                except Exception as e:
+                    logging.exception(e)
+                    bot.send_message(
+                        message.chat.id,
+                        "❌ Не удалось обновить остатки Хаба из Google Таблицы. Повторите попытку позже.",
+                        reply_markup = telebot.types.ReplyKeyboardRemove()
+                    )
+                    return
+                bot.send_message(message.chat.id, "Выберите вариант из предложенных:",
+                                 reply_markup=getKeyboardList(key_type))
+                bot.register_next_step_handler(message, step_xab_move)
+            else:
+                bot.send_message(message.chat.id, "Марка автомобиля:",
+                                 reply_markup=getKeyboardStep1(get_list_marka_ts(record, Mv)))
+                bot.register_next_step_handler(message, step7_move)
+
+def step6_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0 and (str(record[Mv.TYPE_ACTION]) == "Забираете со склада" or str(record[Mv.TYPE_ACTION]) == "Сдаете бой"):
+                record.pop(len(record) - 1)
+                record.pop(len(record) - 1)
+                step3_move(message, 1)
+                return
+            if message.text == "Назад" and nazad == 0 and str(record[Mv.TYPE_ACTION]) == "Передаете в техничку":
+                record.pop(len(record) - 1)
+                step4_move(message, 1)
+                return
+            if not nazad:
+                record.append(message.text)
+            bot.send_message(message.chat.id, "Марка автомобиля:",
+                             reply_markup=getKeyboardStep1(get_list_marka_ts(record, Mv)))
+            bot.register_next_step_handler(message, step7_move)
+
+def step_xab_move(message, nazad=0):
+    global mvrecords, xab_pages
+    if check_exit(message, 3):
+        return
+
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        # Назад
+        if message.text == "Назад" and nazad == 0:
+            record.pop(len(record) - 1)
+            record.pop(len(record) - 1)
+            xab_pages.pop(message.from_user.id, None)
+            step4_move(message, 1)
+            return
+
+        # Пролистывание — «Ещё»
+        if message.text == "Ещё" and message.from_user.id in xab_pages:
+            xab_pages[message.from_user.id]["page"] += 1
+            show_xab_page(message, message.from_user.id, start_over=False)
+            bot.register_next_step_handler(message, step_xab_move)
+            return
+
+        # Пользователь выбрал КОНКРЕТНУЮ позицию (не тип и не «Ещё»)
+        if message.text not in key_type:
+            st = xab_pages.get(message.from_user.id)
+            chosen_type = st["type"] if st else message.text.split(" ", 1)[0]
+            xab_pages.pop(message.from_user.id, None)
+            # ВАЖНО: обрабатываем выбор СРАЗУ, а не «на следующее сообщение»
+            step_xab_move1(message, chosen_type)
+            return
+
+        # Пользователь выбрал тип (Комплект/Ось/Правое/Левое)
+        type_selected = message.text.split(" ", 1)[0]
+        options = get_xab_koles(record[Mv.COMPANY], type_selected, message.from_user.id)
+        if not options:
+            bot.send_message(
+                message.chat.id,
+                "В хабе нет выбранного варианта, выберете другой вариант:",
+                reply_markup=getKeyboardList(key_type)
             )
-        except RuntimeError:
-            logger.error("Не удалось записать данные в Выгрузка ремонты/утиль после 3 попыток")
+            bot.register_next_step_handler(message, step_xab_move)
+            return
 
-@dp.message_handler(commands=["check"], state="*")
-async def cmd_check(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[check] User @{user.username} ({user.id}) начал оформление check")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
-    await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-    await CheckStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=CheckStates.WAIT_COMPANY)
-async def check_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
+        xab_pages[message.from_user.id] = {"type": type_selected, "options": options, "page": 0}
+        show_xab_page(message, message.from_user.id, start_over=True)
+        bot.register_next_step_handler(message, step_xab_move)
         return
 
-    company=message.text
-    if str(company) in key_company:
-        await state.update_data(company=company)
-
-    else:
-        message.answer("Вы ввели компание не из списка. Повторите выбор:",
-                         reply_markup=getKeyboardStep1(key_company))
-        await CheckStates.WAIT_COMPANY.set()
+##
+def step_xab_move1(message, type, nazad=0):
+    """
+    Функция обрабатывает выбор пользователя.
+    После получения выбора из списка (строка, состоящая из значений, объединённых через "|")
+    определяется ключ группы (в исходном порядке):
+      (Марка ТС, Радиус, Размер, Марка резины, Модель резины, Сезонность, Тип диска)
+    Затем из кэша удаляются строки согласно выбранному типу.
+    После чего данные преобразуются и добавляются в запись пользователя.
+    """
+    global mvrecords
+    if check_exit(message, 3):
         return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                step5_move(message, 1)
+                return
 
-    await message.answer("Марка автомобиля:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-    await CheckStates.WAIT_MARKA_TS.set()
+            temp = split_entry(message.text)  # [Марка ТС, Радиус, Размер, Марка резины, Модель резины, Сезонность, Тип диска]
 
-@dp.message_handler(state=CheckStates.WAIT_MARKA_TS)
-async def check_marka_ts(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
+            key = (
+                temp[0].strip(),
+                temp[1].strip(),
+                temp[2].strip(),
+                temp[3].strip(),
+                temp[4].strip(),
+                temp[5].strip(),
+                temp[6].strip()
+            )
+
+            # Определяем, сколько строк удалить в зависимости от выбранного типа
+            removal = {}
+            if type in ["Левое", "Правое"]:
+                removal[type] = 1
+            elif type == "Ось":
+                removal = {"Левое": 1, "Правое": 1}
+            elif type == "Комплект":
+                removal = {"Левое": 2, "Правое": 2}
+
+
+            # Унифицированная структура: [Марка ТС, Радиус, Размер, Марка резины, Модель резины, Сезон, Тип диска, COUNT_LEFT, COUNT_RIGHT]
+            if type == "Левое":
+                count_left, count_right = 1, 0
+            elif type == "Правое":
+                count_left, count_right = 0, 1
+            elif type == "Ось":
+                count_left, count_right = 1, 1
+            elif type == "Комплект":
+                count_left, count_right = 2, 2
+            else:
+                count_left, count_right = 0, 0
+
+            tlist = [
+                temp[0], temp[1], temp[2],
+                temp[3], temp[4], temp[5],
+                temp[6], count_left, count_right
+            ]
+            record.append(tlist)
+
+            bot.send_message(
+                message.chat.id,
+                "Требуются еще колеса:",
+                reply_markup=getKeyboardStep1(key_sogl)
+            )
+            bot.register_next_step_handler(message, step15_move)
+
+
+def step7_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
         return
-
-    if message.text == "Назад":
-        await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-        await CheckStates.WAIT_COMPANY.set()
-        return
-
-    marka_ts = message.text
-    await state.update_data(marka_ts=marka_ts)
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if not check_validation_marka_ts(company, marka_ts):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await SborkaStates.WAIT_MARKA_TS.set()
-        return
-
-    await message.answer("Укажите, что проверяем:", reply_markup=getKeyboardList(key_type_check))
-    await CheckStates.WAIT_TYPE_CHECK.set()
-
-@dp.message_handler(state=CheckStates.WAIT_TYPE_CHECK)
-async def check_type_check(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        data = await state.get_data()
-        company = data.get("company", "")
-        await message.answer("Марка автомобиля:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_ts(company))))))
-        await CheckStates.WAIT_MARKA_TS.set()
-        return
-
-    type_check = message.text
-    words = type_check.split()
-    base = words[0]
-
-    if base != "Левое" and base != "Правое":
-        await state.update_data(type_check=type_check, type_kolesa=base, type_sborka="sborka_ko")
-    else:
-        await state.update_data(type_check=type_check, type_kolesa=base, type_sborka="sborka")
-
-    await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-    await CheckStates.WAIT_TYPE_DISK.set()
-
-@dp.message_handler(state=CheckStates.WAIT_TYPE_DISK)
-async def check_type_disk(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Укажите, что проверяем:", reply_markup=getKeyboardList(key_type_check))
-        await CheckStates.WAIT_TYPE_CHECK.set()
-        return
-
-    type_disk = message.text
-    await state.update_data(type_disk=type_disk)
-
-
-    await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-    await CheckStates.WAIT_RADIUS.set()
-
-
-@dp.message_handler(state=CheckStates.WAIT_RADIUS)
-async def check_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Тип диска:", reply_markup=getKeyboardList(key_type_disk))
-        await CheckStates.WAIT_TYPE_DISK.set()
-        return
-
-    radius = message.text
-    await state.update_data(radius=radius)
-
-
-    if not check_validation_radius(company,radius):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРадиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await CheckStates.WAIT_RADIUS.set()
-        return
-
-    await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company,radius))))))
-    await CheckStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=CheckStates.WAIT_RAZMER)
-async def check_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-
-    if message.text == "Назад":
-        await message.answer("Радиус:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_radius(company))))))
-        await CheckStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-    await state.update_data(razmer=razmer)
-
-
-    if not check_validation_razmer(company, radius, razmer):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nРазмер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company,radius))))))
-
-        await CheckStates.WAIT_RAZMER.set()
-        return
-
-    await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-    await CheckStates.WAIT_MARKA_REZ.set()
-
-
-@dp.message_handler(state=CheckStates.WAIT_MARKA_REZ)
-async def check_marka_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-
-    if message.text == "Назад":
-        await message.answer("Размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(company, radius))))))
-        await CheckStates.WAIT_RAZMER.set()
-        return
-
-    marka_rez = message.text
-    await state.update_data(marka_rez=marka_rez)
-
-    if not check_validation_marka(company, radius, razmer, marka_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМарка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await CheckStates.WAIT_MARKA_REZ.set()
-        return
-
-    await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-    await CheckStates.WAIT_MODEL_REZ.set()
-
-
-@dp.message_handler(state=CheckStates.WAIT_MODEL_REZ)
-async def check_model_rez(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-
-    if message.text == "Назад":
-        await message.answer("Марка резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka(company, radius, razmer))))))
-        await CheckStates.WAIT_MARKA_REZ.set()
-        return
-
-    model_rez = message.text
-    await state.update_data(model_rez=model_rez)
-
-    if not check_validation_model(company, radius, razmer, marka_rez, model_rez):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nМодель резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await CheckStates.WAIT_MODEL_REZ.set()
-        return
-
-    await message.answer("Сезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-    await CheckStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=CheckStates.WAIT_SEZON)
-async def check_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    username = data.get("username", "")
-    company = data.get("company", "")
-    grz = data.get("grz", "")
-    type_disk = data.get("type_disk", "")
-    marka_ts = data.get("marka_ts", "")
-    vid_kolesa = data.get("vid_kolesa", "")
-    radius = data.get("radius", "")
-    razmer = data.get("razmer", "")
-    marka_rez = data.get("marka_rez", "")
-    model_rez = data.get("model_rez", "")
-    sost_disk = data.get("sost_disk", "")
-    sost_rez = data.get("sost_rez", "")
-    sost_disk_prich = data.get("sost_disk_prich", "")
-    sost_rez_prich = data.get("sost_rez_prich", "")
-    type_check = data.get("type_check", "")
-    type="check"
-
-    por_nomer_diska = ""
-    por_nomer_rezina = ""
-    message_link = ""
-
-    if message.text == "Назад":
-        await message.answer("Модель резины:",
-                             reply_markup=getKeyboardList(
-                                 sorted(list(set(get_list_model(company, radius, razmer, marka_rez))))))
-        await CheckStates.WAIT_MODEL_REZ.set()
-        return
-
-    sezon = message.text
-    await state.update_data(sezon=sezon,type=type)
-
-    if not check_validation_sezon(company, radius, razmer, marka_rez, model_rez,sezon):
-        await message.answer("Введенного значения нет в базе. Попробуйте еще\nСезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon(company, radius, razmer, marka_rez, model_rez))))))
-        await CheckStates.WAIT_SEZON.set()
-        return
-
-    generating_report_google_sheets(username, company, grz, type_disk, marka_ts, vid_kolesa, radius, razmer, marka_rez,
-                                    model_rez, sezon,
-                                    sost_disk, sost_rez, sost_disk_prich, sost_rez_prich, por_nomer_diska,
-                                    por_nomer_rezina, message_link, type, type_check)
-
-    await message.answer("Сбор под заявку:", reply_markup=getKeyboardList(key_sogl))
-    await SborkaStates.WAIT_ZAYAVKA.set()
-
-
-
-@dp.message_handler(commands=["start_job_shift"], state="*")
-async def cmd_start_job_shift(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[start_job_shift] User @{user.username} ({user.id}) начал оформление заявки на start_job_shift")
-
-    await state.finish()
-    await state.update_data(user_id=user.id, username=user.username)
-    try:
-        data = {'chat_id': str(message.from_user.id)}
-        resp = requests.get(URL_GET_FIO, data=data)
-        rep = resp.json()
-        await state.update_data(fio=_safe_fullname_from_profile(rep, message))
-    except Exception as e:
-        logging.exception(e)
-        await message.answer("Возникла ошибка чтения Ваших данных из базы КК. Убедитесь, что Вы успешно прошли регистрацию и повторите попытку оформления заявки. При повторном возникновении ошибки обратитесь к разработчикам")
-
-    await message.answer("Прикретите фото. И нажмите на кнопку Готово", reply_markup=_keyboard_done_exit())
-    await StartJobShiftStates.WAIT_FILES.set()
-
-@dp.message_handler(
-    content_types=[ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO],
-    state=StartJobShiftStates.WAIT_FILES
-)
-async def collect_files_start_job_shift(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    # Определяем тип и file_id
-    if message.photo:
-        file_type = 'photo'
-        file_id = message.photo[-1].file_id
-    elif message.document:
-        file_type = 'document'
-        file_id = message.document.file_id
-    elif message.video:
-        file_type = 'video'
-        file_id = message.video.file_id
-    else:
-        return  # неожиданный content_type
-
-    files.append({'type': file_type, 'media': file_id})
-    await state.update_data(files=files)
-
-@dp.message_handler(lambda msg: msg.text == "Готово", state=StartJobShiftStates.WAIT_FILES)
-async def finalize_start_job_shift(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    if not files:
-        return await message.answer("Нужно прикрепить как минимум 1 фото")
-
-    fio = data.get("fio", "")
-    username = data.get("username", "")
-
-    # Генерируем подпись и отправляем медиа
-    caption = generate_tg_caption("Начало смены", fio, username)
-    files[0]['caption'] = caption
-    data_media = {
-        'chat_id': str(chat_id_change_work),
-        'message_thread_id': str(thread_id_change_work),
-        'media': json.dumps(files)
-    }
-    resp = requests.post(urlSendMediaGroup, data=data_media)
-    resp_json = resp.json()
-    message_id = resp_json["result"][0]["message_id"]
-    message_link = f"https://t.me/c/{str(chat_id_change_work)[4:]}/{message_id}"
-
-    # Запись в Google Sheets и получение duration
-    tlist = [
-        (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
-        fio,
-        "Начало смены",
-        username,
-        message_link
-    ]
-
-    try:
-        duration = with_sheets_retry(
-            write_in_answers_ras_shift,
-            tlist,
-            "Лист1",
-            max_attempts=3,
-            base_delay=2
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        # Возврат из финального превью к добавлению ещё позиций
+        if nazad == 2 and message.text == "Назад":
+            bot.send_message(
+                message.chat.id,
+                get_report_move_str(record, Mv.COMPANY + 1, Mv.COMPANY + get_number_last_list(record) + 1),
+                reply_markup=getKeyboardList(key_corek)
+            )
+            bot.register_next_step_handler(message, step16_move)
+            return
+
+        if nazad != 1:
+            tlist = [message.text]  # Марка ТС
+            record.append(tlist)
+            if not check_validation_marka_ts(record, Mv, record[-1]):
+                postpone_build(message, record, 2)
+                return
+
+        bot.send_message(
+            message.chat.id,
+            "Радиус:",
+            reply_markup=getKeyboardList(sorted(list(set(get_list_radius(record, Mv)))))
         )
-    except RuntimeError:
-        logger.error("Не удалось записать данные в Google Sheets после 3 попыток")
-        duration = None
+        bot.register_next_step_handler(message, step8_move)
 
-    # Если duration получена, дописываем в подпись
-    if duration:
-        new_caption = f"{caption}\n⏱ Длительность смены: {duration}"
-        await bot.edit_message_caption(
-            chat_id=chat_id_change_work,
-            message_id=message_id,
-            caption=new_caption
-        )
-
-    # Ответ пользователю
-    if resp.status_code < 400:
-        await message.answer('Ваша заявка сформирована', reply_markup=types.ReplyKeyboardRemove())
-    else:
-        await message.answer('Возникли проблемы с оформлением заявки. Обратитесь к разработчикам',
-                             reply_markup=types.ReplyKeyboardRemove())
-
-def generate_tg_caption(action, fio, username):
-    ts = datetime.now() + timedelta(hours=3)
-    return (
-        f"⌚️ {ts.strftime('%d.%m.%Y %H:%M:%S')}\n\n"
-        f"👷 @{username}\n\n"
-        f"{fio}\n\n"
-        f"{action}\n\n"
-    )
-@dp.message_handler(lambda msg: msg.text == "Выход", state=EndWorkShiftStates.WAIT_FILES)
-async def exit_work_shift(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
+def step8_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
         return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
 
-@dp.message_handler(commands=["end_work_shift"], state="*")
-async def cmd_end_work_shift(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
+        if message.text == "Назад" and nazad == 0:
+            record.pop()  # убираем tlist
+            step6_move(message, 1)
+            return
 
-    user = message.from_user
-    logger.info(f"[end_work_shift] User @{user.username} ({user.id}) начал оформление заявки на end_work_shift")
+        if not nazad:
+            record[-1].append(message.text)  # Радиус
+            if not check_validation_radius(record, Mv, record[-1]):
+                postpone_build(message, record, 2)
+                return
 
-    await state.finish()
-    await state.update_data(user_id=user.id, username=user.username)
-    try:
-        data = {'chat_id': str(message.from_user.id)}
-        resp = requests.get(URL_GET_FIO, data=data)
-        rep = resp.json()
-        await state.update_data(fio=_safe_fullname_from_profile(rep, message))
-    except Exception as e:
-        logging.exception(e)
-        await message.answer("Возникла ошибка чтения Ваших данных из базы КК. Убедитесь, что Вы успешно прошли регистрацию и повторите попытку оформления заявки. При повторном возникновении ошибки обратитесь к разработчикам")
-        return
-
-    await message.answer("Прикретите фото. И нажмите на кнопку Готово", reply_markup=_keyboard_done_exit())
-    await EndWorkShiftStates.WAIT_FILES.set()
-
-@dp.message_handler(
-    content_types=[ContentType.PHOTO, ContentType.DOCUMENT, ContentType.VIDEO],
-    state=EndWorkShiftStates.WAIT_FILES
-)
-async def collect_files_end_work_shift(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    # Определяем тип и file_id
-    if message.photo:
-        file_type = 'photo'
-        file_id = message.photo[-1].file_id
-    elif message.document:
-        file_type = 'document'
-        file_id = message.document.file_id
-    elif message.video:
-        file_type = 'video'
-        file_id = message.video.file_id
-    else:
-        return  # неожиданный content_type
-
-    files.append({'type': file_type, 'media': file_id})
-    await state.update_data(files=files)
-
-@dp.message_handler(lambda msg: msg.text == "Готово", state=EndWorkShiftStates.WAIT_FILES)
-async def finalize_end_work_shift(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    files = data.get('files', [])
-
-    if not files:
-        return await message.answer("Нужно прикрепить как минимум 1 фото")
-
-    fio = data.get("fio", "")
-    username = data.get("username", "")
-
-    # Генерируем подпись и отправляем медиа
-    caption = generate_tg_caption("Окончание смены", fio, username)
-    files[0]['caption'] = caption
-    data_media = {
-        'chat_id': str(chat_id_change_work),
-        'message_thread_id': str(thread_id_change_work),
-        'media': json.dumps(files)
-    }
-    resp = requests.post(urlSendMediaGroup, data=data_media)
-    resp_json = resp.json()
-    message_id = resp_json["result"][0]["message_id"]
-    message_link = f"https://t.me/c/{str(chat_id_change_work)[4:]}/{message_id}"
-
-    # Запись в Google Sheets и получение duration
-    tlist = [
-        (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"),
-        fio,
-        "Окончание смены",
-        username,
-        message_link
-    ]
-
-    try:
-        duration = with_sheets_retry(
-            write_in_answers_ras_shift,
-            tlist,
-            "Лист1",
-            max_attempts=3,
-            base_delay=2
+        bot.send_message(
+            message.chat.id,
+            "Размер:",
+            reply_markup=getKeyboardList(sorted(list(set(get_list_razmer(record, Mv, record[-1])))))
         )
-    except RuntimeError:
-        logger.error("Не удалось записать данные в Google Sheets после 3 попыток")
-        duration = None
+        bot.register_next_step_handler(message, step9_move)
 
-    # Если duration получена, дописываем в подпись
-    if duration:
-        new_caption = f"{caption}⏱ Длительность смены: {duration}"
-        await bot.edit_message_caption(
-            chat_id=chat_id_change_work,
-            message_id=message_id,
-            caption=new_caption
+def step9_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            record[-1].pop()  # убрать Радиус
+            step7_move(message, 1)
+            return
+
+        if not nazad:
+            record[-1].append(message.text)  # Размер
+            if not check_validation_razmer(record, Mv, record[-1]):
+                postpone_build(message, record, 2)
+                return
+
+        bot.send_message(
+            message.chat.id,
+            "Марка:",
+            reply_markup=getKeyboardList(sorted(list(set(get_list_marka(record, Mv, record[-1])))))
+        )
+        bot.register_next_step_handler(message, step10_move)
+
+def step10_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            record[-1].pop()  # убрать Размер
+            step8_move(message, 1)
+            return
+
+        if not nazad:
+            record[-1].append(message.text)  # Марка резины
+            if not check_validation_marka(record, Mv, record[-1]):
+                postpone_build(message, record, 2)
+                return
+
+        bot.send_message(
+            message.chat.id,
+            "Модель:",
+            reply_markup=getKeyboardList(sorted(list(set(get_list_model(record, Mv, record[-1])))))
+        )
+        bot.register_next_step_handler(message, step11_move)
+
+def step11_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            record[-1].pop()  # убрать Марка резины
+            step9_move(message, 1)
+            return
+
+        if not nazad:
+            record[-1].append(message.text)  # Модель резины
+            if not check_validation_model(record, Mv, record[-1]):
+                postpone_build(message, record, 2)
+                return
+            # Добавляем сезон
+            record[-1].append(get_sezon(record, Mv, record[-1]))
+
+        bot.send_message(
+            message.chat.id,
+            "Тип диска:",
+            reply_markup=getKeyboardList(key_type_disk)
+        )
+        bot.register_next_step_handler(message, step12_move)
+
+def step12_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            # убрать Сезон (последний) и вернуться к выбору модели
+            record[-1].pop()
+            step10_move(message, 1)
+            return
+
+        if not nazad:
+            record[-1].append(message.text)  # Тип диска
+
+        bot.send_message(
+            message.chat.id,
+            "Сколько левых колес:",
+            reply_markup=getKeyboardList(key_chisla)
+        )
+        bot.register_next_step_handler(message, step13_move)
+
+def step13_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            record[-1].pop()  # убрать Тип диска
+            step11_move(message, 1)
+            return
+
+        try:
+            if not nazad:
+                count = int(message.text)
+                record[-1].append(count)  # COUNT_LEFT
+            bot.send_message(
+                message.chat.id,
+                "Сколько правых колес:",
+                reply_markup=getKeyboardList(key_chisla)
+            )
+            bot.register_next_step_handler(message, step14_move)
+        except Exception:
+            bot.send_message(
+                message.chat.id,
+                "Введите целое число",
+                reply_markup=getKeyboardList(key_chisla)
+            )
+            bot.register_next_step_handler(message, step13_move)
+
+
+def step14_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for record in mvrecords:
+        if record[Mv.USER_ID] != message.from_user.id:
+            continue
+
+        if message.text == "Назад" and nazad == 0:
+            record[-1].pop()  # убрать COUNT_LEFT
+            step12_move(message, 1)
+            return
+
+        try:
+            if not nazad:
+                count = int(message.text)
+                record[-1].append(count)  # COUNT_RIGHT
+
+            bot.send_message(
+                message.chat.id,
+                "Требуются еще колеса:",
+                reply_markup=getKeyboardList(key_sogl)
+            )
+            bot.register_next_step_handler(message, step15_move)
+        except Exception:
+            bot.send_message(
+                message.chat.id,
+                "Введите целое число",
+                reply_markup=getKeyboardList(key_chisla)
+            )
+            bot.register_next_step_handler(message, step14_move)
+
+def step15_move(message, nazad=0):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                if str(record[Mv.TYPE_ACTION]) != "Забираете со склада":
+                    record[len(record)-1].pop(len(record[len(record)-1]) - 1)
+                    step13_move(message, 1)
+                    return
+            if message.text == "Да":
+                if str(record[Mv.TYPE_ACTION]) == "Забираете со склада":
+                    bot.send_message(message.chat.id, "Выберите вариант из предложенных:",
+                                     reply_markup=getKeyboardStep1(key_type))
+                    bot.register_next_step_handler(message, step_xab_move)
+                else:
+                    bot.send_message(message.chat.id, "Марка автомобиля:",
+                                     reply_markup=getKeyboardList(get_list_marka_ts(record, Mv)))
+                    bot.register_next_step_handler(message, step7_move, 2)
+            else:
+                bot.send_message(message.chat.id, get_report_move_str(record, Mv.COMPANY + 1, Mv.COMPANY + get_number_last_list(record) + 1), reply_markup=getKeyboardList(key_corek))
+                bot.register_next_step_handler(message, step16_move)
+
+
+
+def step16_move(message):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if message.text == "Заполнено корректно":
+                bot.send_message(message.chat.id, "Прикрепите от 2 до 10 фото", reply_markup=telebot.types.ReplyKeyboardRemove())
+            else:
+                bot.send_message(message.chat.id, "Удалить:", reply_markup=getKeyboardList(get_report_move_list(record, Mv.COMPANY + 1, Mv.COMPANY + get_number_last_list(record)+1)))
+                bot.register_next_step_handler(message, step17_move)
+
+def step17_move(message):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            number_delete = get_number_delete(record, message.text, Mv.COMPANY + 1, Mv.COMPANY + get_number_last_list(record) + 1)
+            record.pop(int(Mv.COMPANY) + int(number_delete))
+            bot.send_message(message.chat.id, "Действие:", reply_markup=getKeyboardList(key_action_record))
+            bot.register_next_step_handler(message, step18_move)
+
+def step18_move(message):
+    global mvrecords
+    if check_exit(message, 3):
+        return
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.from_user.id:
+            if str(message.text) == "Завершить":
+                bot.send_message(message.chat.id, "Прикрепите от 2 до 10 фото", reply_markup=telebot.types.ReplyKeyboardRemove())
+            elif str(message.text) == "Добавить запись":
+                if str(record[Mv.TYPE_ACTION]) == "Забираете со склада":
+                    bot.send_message(message.chat.id, "Выберите вариант из предложенных:",
+                                     reply_markup=getKeyboardStep1(key_type))
+                    bot.register_next_step_handler(message, step_xab_move)
+                else:
+                    bot.send_message(message.chat.id, "Марка автомобиля:", reply_markup=getKeyboardList(get_list_marka_ts(record, Mv)))
+                    bot.register_next_step_handler(message, step7_move, 2)
+            else:
+                lst = get_report_move_list(record, Mv.COMPANY + 1,
+                                                                Mv.COMPANY + get_number_last_list(record) + 1)
+                bot.send_message(message.chat.id, "Удалить:", reply_markup=getKeyboardList(lst))
+                bot.register_next_step_handler(message, step17_move)
+
+def get_report_move_list(record, begin, end):
+    """
+    Формирует строки отчёта для ветки move.
+    Для каждой позиции (одинаковая марка/модель/размер/сезон/тип диска) считает:
+      - Комплект: 2 левых + 2 правых  -> "Комплект Nшт"
+      - Ось:      1 левый + 1 правый  -> "Ось Nшт"
+      - Остатки:  "Левый Xшт" / "Правый Yшт"
+    """
+
+    def _to_int(v):
+        try:
+            s = str(v).strip()
+            return int(s) if s else 0
+        except Exception:
+            return 0
+
+    lines = []
+    for mv in record[begin:end]:
+        head = (
+            f"🛞 {mv[Rc.MARKA_TS]} | "
+            f"{mv[Rc.RAZMER]}/{mv[Rc.RADIUS]} | "
+            f"{mv[Rc.MARKA_REZ]} {mv[Rc.MODEL_REZ]} | "
+            f"{mv[Rc.SEZON]} | {mv[Rc.TIP_DISKA]} | "
         )
 
-    # Ответ пользователю
-    if resp.status_code < 400:
-        await message.answer('Ваша заявка сформирована', reply_markup=types.ReplyKeyboardRemove())
+        left_count = _to_int(mv[Rc.COUNT_LEFT])
+        right_count = _to_int(mv[Rc.COUNT_RIGHT])
+
+        details = []
+
+        # Комплект: 2 левых + 2 правых
+        kit_count = min(left_count // 2, right_count // 2)
+        if kit_count:
+            details.append(f"Комплект {kit_count}шт")
+            left_count -= kit_count * 2
+            right_count -= kit_count * 2
+
+        # Ось: 1 левый + 1 правый
+        axle_count = min(left_count, right_count)
+        if axle_count:
+            details.append(f"Ось {axle_count}шт")
+            left_count -= axle_count
+            right_count -= axle_count
+
+        # Остатки по сторонам
+        if left_count:
+            details.append(f"Левый {left_count}шт")
+        if right_count:
+            details.append(f"Правый {right_count}шт")
+
+        tail = " | ".join(details) + " |" if details else "|"
+        lines.append(head + tail)
+
+    return lines
+
+def get_report_move_str(record, begin, end):
+    out_str = ""
+    for i, rc in enumerate(get_report_move_list(record, begin, end)):
+        out_str = out_str + rc + "\n\n"
+    return out_str
+
+def get_number_delete(record, text, begin, end):
+    i = 0
+    for rc in get_report_move_list(record, begin, end):
+        i = i + 1
+        if rc.replace(" ", "") == text.replace(" ", ""):
+            return i
+
+def get_number_last_list(record):
+    max = 0
+    for i, rc in enumerate(record):
+        if isinstance(rc, list):
+            max = max + 1
+    return max
+def generating_report_move(message):
+    time.sleep(2)
+    global mvrecords
+    media = []
+    resp = None
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == message.chat.id:
+            # Если пользователь захватывал кэш, освобождаем его один раз
+            if message.chat.id in users_with_cache:
+                release_cache(message.from_user.id)
+
+            number_last_list = get_number_last_list(record)
+            if number_last_list == 0:
+                bot.send_message(message.chat.id,
+                                 "Не найдено ни одной позиции для отчёта. Добавьте хотя бы одну запись и повторите отправку фото")
+                return
+            if len(record) < number_last_list + 10:
+                record.append(1)
+                bot.send_message(message.chat.id, "Прикрепите еще фото")
+                return
+            for i, img in enumerate(record[number_last_list + 8:]):
+                if i < 10:
+                    media.append(dict(type=str(record[number_last_list + 7]), media=f'{img}'))
+            if not media:
+                bot.send_message(message.chat.id, "Нужно прикрепить от 2 до 10 фото одним сообщением")
+                return
+            if record[Mv.COMPANY] == "СитиДрайв":
+                chatId = chat_id_Sity
+                chat_id_for_link = link_Sity
+                thread_id = thread_id_Sity_move
+            elif record[Mv.COMPANY] == "Яндекс":
+                chatId = chat_id_Yandex
+                chat_id_for_link = link_Yandex
+                thread_id = thread_id_Yandex_move
+            else:
+                chatId = chat_id_Belka
+                chat_id_for_link = link_Belka
+                thread_id = thread_id_Belka_move
+            try:
+                len_list = int(number_last_list / 5)
+                ost_len_list = number_last_list % 5
+                cur_i = 0
+                if len_list:
+                    for i in range(0,len_list):
+                        cur_i = i + 1
+                        begin = Mv.COMPANY + 1 + 5 * i
+                        end = Mv.COMPANY + 1 + 5 * (i + 1)
+                        media[0]['caption'] = generating_report_tg_move(message.chat.id, begin, end, i + 1)
+                        dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(media)}
+                        #dataSendMediaGroup = {'chat_id': str(chatId),'media': json.dumps(media)}
+                        resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                        data = resp.json()
+                        time.sleep(0.4)
+                        #message_id = 11
+                        message_id = data["result"][0]["message_id"]
+                        message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
+                        record.append(message_link)
+
+                        if str(record[Mv.TYPE_ACTION]) != "Сдаете бой":
+                            ok = update_xab_koles_bulk(
+                                record[Mv.COMPANY],
+                                [record[idx] for idx in range(begin, end)],
+                                str(record[Mv.USERNAME]).strip(),
+                                str(record[Mv.GRZ_TECH]).strip()
+                            )
+                            if ok != 1:
+                                record.pop(len(record) - 1)
+                                bot.send_message(message.chat.id,
+                                                 "Не удалось списать позиции из хаба: вероятно, комплект уже забран/недоступен. "
+                                                 "Заявка не записана в таблицу. Обновите список и попробуйте снова")
+                                warn_text = (
+                                    "⚠️ Списание не удалось, заявка НЕ зафиксирована в таблице. "
+                                    "Игнорируйте сообщение выше"
+                                )
+                                try:
+                                    bot.send_message(
+                                        chat_id = chatId,
+                                        message_thread_id = message_thread_id,
+                                        text = warn_text
+                                    )
+                                except Exception as e:
+                                    logger.warning("Не удалось отправить предупреждение в сервисный чат: %s", e)
+                                return
+                        generating_report_gs_move(message.chat.id, begin, end)
+                        record.pop(len(record) - 1)
+                if ost_len_list:
+                    begin_tail = Mv.COMPANY + 1 + 5 * cur_i
+                    end_tail = Mv.COMPANY + 1 + 5 * cur_i + ost_len_list
+                    media[0]['caption'] = generating_report_tg_move(message.chat.id, begin_tail, end_tail, cur_i + 1)
+                    dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(media)}
+                    #dataSendMediaGroup = {'chat_id': str(chatId),'media': json.dumps(media)}
+                    resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                    data = resp.json()
+                    time.sleep(0.4)
+                    #message_id = 11
+                    message_id = data["result"][0]["message_id"]
+                    message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
+                    record.append(message_link)
+
+                    if str(record[Mv.TYPE_ACTION]) != "Сдаете бой":
+                        ok = update_xab_koles_bulk(
+                            record[Mv.COMPANY],
+                            [record[idx] for idx in range(begin_tail, end_tail)],
+                            str(record[Mv.USERNAME]).strip(),
+                            str(record[Mv.GRZ_TECH]).strip()
+                        )
+                        if ok != 1:
+                            record.pop(len(record) - 1)
+                            bot.send_message(message.chat.id,
+                                             "Не удалось списать позиции из хаба: вероятно, комплект уже забран/недоступен. "
+                                             "Заявка не записана в таблицу. Обновите список и попробуйте снова."
+                                             )
+                            warn_text = (
+                                "⚠️ Списание не удалось, заявка НЕ зафиксирована в таблице. "
+                                "Игнорируйте сообщение выше"
+                            )
+                            try:
+                                bot.send_message(
+                                    chat_id=chatId,
+                                    message_thread_id=message_thread_id,
+                                    text=warn_text
+                                )
+                            except Exception as e:
+                                logger.warning("Не удалось отправить предупреждение в сервисный чат: %s", e)
+                            return
+                    generating_report_gs_move(message.chat.id, begin_tail, end_tail)
+                    record.pop(len(record) - 1)
+
+                # Если ничего не отправили (ни одной пачки) — корректно сообщаем
+                if resp is None:
+                    bot.send_message(message.chat.id, 'Не удалось сформировать заявку: нет позиций для выгрузки')
+                elif resp.status_code < 400:
+                    bot.send_message(message.chat.id, 'Ваша заявка сформирована')
+                else:
+                    bot.send_message(message.chat.id, 'При формировании заявки произошла ошибка')
+                print_google_data(record[Mv.COMPANY])
+                mvrecords.remove(record)
+                return
+            except Exception as e:
+                mvrecords.remove(record)
+                logging.exception(e)
+                bot.send_message(message.chat.id, "Возникла ошибка. Обратитесь к разработчикам",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
+
+
+def generating_report_tg_move(from_user_id, begin, end, nomer):
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == from_user_id:
+            str_answer = "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
+            if nomer > 0:
+                str_answer = str_answer + "#️⃣ " + str(nomer) + "\n\n"
+            str_answer = str_answer + "🚚Техничка: " + record[Mv.GRZ_TECH] + "\n\n"
+            str_answer = str_answer + "📌" + record[Mv.TYPE_ACTION] + "\n\n"
+            if str(record[Mv.TYPE_ACTION]) == "Передаете в техничку":
+                str_answer = str_answer + "🔀" + record[Mv.GRZ_PEREDACHA] + "\n\n"
+            str_answer = str_answer + "👷 @" + str(record[Mv.USERNAME]) + "\n"
+            str_answer = str_answer + str(record[Mv.FIO]) + "\n\n"
+            str_answer = str_answer + "🏪"+ str(record[Mv.COMPANY]) + "\n\n"
+            str_answer = str_answer + get_report_move_str(record, begin, end)
+            return str_answer
+
+def generating_report_gs_move(from_user_id, begin, end):
+    for i, record in enumerate(mvrecords):
+        if record[Mv.USER_ID] == from_user_id:
+            sum_list = list()
+            for i, mv in enumerate(record[begin:end]):
+                count_left = int(mv[Rc.COUNT_LEFT])
+                count_right = int(mv[Rc.COUNT_RIGHT])
+                while count_left > 0:
+                    tlist = list()
+                    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
+                    tlist.append(record[Mv.GRZ_TECH])
+                    tlist.append(record[Mv.TYPE_ACTION])
+                    tlist.append(record[Mv.GRZ_PEREDACHA])
+                    tlist.append(record[Mv.COMPANY])
+                    tlist.append(mv[Rc.MARKA_TS])
+                    tlist.append(mv[Rc.RADIUS])
+                    tlist.append(mv[Rc.RAZMER])
+                    tlist.append(mv[Rc.MARKA_REZ])
+                    tlist.append(mv[Rc.MODEL_REZ])
+                    tlist.append(mv[Rc.SEZON])
+                    tlist.append(mv[Rc.TIP_DISKA])
+                    tlist.append("Левое")
+                    tlist.append(record[len(record) - 1])
+                    tlist.append(record[Mv.USERNAME])
+                    sum_list.append(tlist)
+                    count_left = count_left - 1
+                while count_right > 0:
+                    tlist = list()
+                    tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
+                    tlist.append(record[Mv.GRZ_TECH])
+                    tlist.append(record[Mv.TYPE_ACTION])
+                    tlist.append(record[Mv.GRZ_PEREDACHA])
+                    tlist.append(record[Mv.COMPANY])
+                    tlist.append(mv[Rc.MARKA_TS])
+                    tlist.append(mv[Rc.RADIUS])
+                    tlist.append(mv[Rc.RAZMER])
+                    tlist.append(mv[Rc.MARKA_REZ])
+                    tlist.append(mv[Rc.MODEL_REZ])
+                    tlist.append(mv[Rc.SEZON])
+                    tlist.append(mv[Rc.TIP_DISKA])
+                    tlist.append("Правое")
+                    tlist.append(record[len(record) - 1])
+                    tlist.append(record[Mv.USERNAME])
+                    sum_list.append(tlist)
+                    count_right = count_right - 1
+            write_answers_gs_rows(sum_list, "Выгрузка передача", gspread_url_peremeshenie)
+            if str(record[Mv.TYPE_ACTION]) == "Сдаете бой":
+                write_answers_gs_rows(sum_list, "Онлайн остатки Бой", gspread_url_peremeshenie)
+
+@bot.message_handler(commands=['parking'])
+def parking(message):
+    global pkrecords
+    # чистим старую сессию пользователя
+    for i, record in enumerate(pkrecords):
+        if record[0] == message.from_user.id:
+            pkrecords.remove(record)
+
+    if int(message.chat.id) > 0:
+        tlist = list()
+        try:
+            resp = requests.get(urlSmallDtp, params={"tg_chat_id": str(message.from_user.id)}, timeout=15, verify=False)
+            rep = resp.json()
+            tlist.append(message.from_user.id)
+            tlist.append(message.from_user.username)
+            tlist.append(rep['user']['fullname'])
+            pkrecords.append(tlist)
+            step1_parking(message)
+        except Exception as e:
+            logging.exception(e)
+            bot.send_message(message.chat.id, "Возникла ошибка чтения Ваших данных из базы КК. Убедитесь, что Вы успешно прошли регистрацию и повторите попытку оформления заявки. Регистрация производится по команде /start \nПри повторном возникновении ошибки обратитесь к разработчикам")
     else:
-        await message.answer('Возникли проблемы с оформлением заявки. Обратитесь к разработчикам', reply_markup=types.ReplyKeyboardRemove())
+        bot.reply_to(message, "Перейдите в личные сообщение с ботом для оформления заявки",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
 
+def step1_parking(message):
+    global pkrecords
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            bot.send_message(message.chat.id, "ГРЗ технички:", reply_markup=getKeyboardStep1(grz_tech))
+            bot.register_next_step_handler(message, step2_parking)
 
-@dp.message_handler(commands=["nomenclature"], state="*")
-async def cmd_nomenclature(message: types.Message, state: FSMContext):
-    if message.from_user.id not in list_users:
-        return await message.answer("У вас нет прав для вызова данной команды")
-
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
-
-    user = message.from_user
-    logger.info(f"[nomenclature] User @{user.username} ({user.id}) начал оформление заявки на nomenclature")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
-    await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-    await NomenclatureStates.WAIT_COMPANY.set()
-
-@dp.message_handler(state=NomenclatureStates.WAIT_COMPANY)
-async def nomenclature_company(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
+def step2_parking(message, nazad=0):
+    global pkrecords
+    if check_exit(message, 0):
         return
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            record.append(message.text)
+            if not check_validation_grz_tech(record, Pk.GRZ_TECH):
+                postpone_build(message, record, 0)
+                return
+            bot.send_message(message.chat.id, "Компания:", reply_markup=getKeyboardList(key_company))
+            bot.register_next_step_handler(message, step3_parking)
 
-    company = message.text
-    if str(company) in key_company:
-        await state.update_data(company=company)
-    else:
-        await message.answer("Вы ввели компание не из списка. Повторите выбор:",
-                         reply_markup=getKeyboardStep1(key_company))
-        await NomenclatureStates.WAIT_COMPANY.set()
+
+def step3_parking(message, nazad=0):
+    global pkrecords
+    if check_exit(message, 0):
         return
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                pkrecords.remove(record)
+                parking(message)
+                return
+            if not nazad:
+                record.append(message.text)
+            bot.send_message(message.chat.id, "Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_exit))
+            bot.register_next_step_handler(message, step4_parking)
 
-    await message.answer("Введите радиус:",
-                             reply_markup=getKeyboardList(key_radius))
-    await NomenclatureStates.WAIT_RADIUS.set()
 
-@dp.message_handler(state=NomenclatureStates.WAIT_RADIUS)
-async def nomenclature_radius(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
+def step4_parking(message, nazad=0):
+    global pkrecords
+    if check_exit(message, 0):
         return
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step2_parking(message)
+                return
+            grz_ts = getGRZTs(record, (message.text).lower(), Pk)
+            if len(grz_ts):
+                bot.send_message(message.chat.id, "Подтвердите ГРЗ из списка:", reply_markup=getKeyboardList(sorted(grz_ts)))
+                bot.register_next_step_handler(message, step5_parking)
+            else:
+                bot.send_message(message.chat.id, "В базе данных нет введенного вами ГРЗ. Попробуйте снова", reply_markup=getKeyboardStep1(key_exit))
+                bot.register_next_step_handler(message, step4_parking)
 
-    if message.text == "Назад":
-        await message.answer("Компания:", reply_markup=getKeyboardList(key_company))
-        await NomenclatureStates.WAIT_COMPANY.set()
+def step5_parking(message):
+    global pkrecords
+    if check_exit(message, 0):
         return
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.from_user.id:
+            if message.text == "Назад":
+                record.pop(len(record) - 1)
+                step3_parking(message)
+                return
+            record.append(message.text)
+            if not check_validation_grz(record, Pk):
+                postpone_build(message, record, 0)
+                return
+            bot.send_message(message.chat.id, "Добавьте скриншот из приложения парковок (от 1 до 2 фото)",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
 
-    radius = message.text
-    await state.update_data(radius=radius)
+def generating_report_parking(message):
+    time.sleep(2)
+    global pkrecords
+    media = []
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == message.chat.id:
+            try:
+                for i, img in enumerate(record[Pk.TIP_DOCUMENT + 1:]):
+                    if i < 2:
+                        media.append(dict(type=str(record[Pk.TIP_DOCUMENT]), media=f'{img}'))
+                media[0]['caption'] = generating_report_tg_parking(message.chat.id)
+                if record[Pk.COMPANY] == "СитиДрайв":
+                    chatId = chat_id_Sity
+                    chat_id_for_link = link_Sity
+                    thread_id = thread_id_Sity
+                elif record[Pk.COMPANY] == "Яндекс":
+                    chatId = chat_id_Yandex
+                    chat_id_for_link = link_Yandex
+                    thread_id = thread_id_Yandex
+                else:
+                    chatId = chat_id_Belka
+                    chat_id_for_link = link_Belka
+                    thread_id = thread_id_Belka
+                dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(media)}
+                #dataSendMediaGroup = {'chat_id': str(chatId),'media': json.dumps(media)}
+                resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                data = resp.json()
+                #message_id = 11
+                message_id = data["result"][0]["message_id"]
+                message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
+                record.append(message_link)
+                generating_report_gs_parking(message.chat.id)
+                if resp.status_code < 400:
+                    bot.send_message(message.chat.id, 'Ваша заявка сформирована')
+                else:
+                    bot.send_message(message.chat.id, 'При формировании заявки произошла ошибка')
+                pkrecords.remove(record)
+                return
+            except Exception as e:
+                pkrecords.remove(record)
+                logging.exception(e)
+                bot.send_message(message.chat.id, "Возникла ошибка. Обратитесь к разработчикам",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
 
-    data = await state.get_data()
-    company = data.get("company", "")
+def generating_report_tg_parking(from_user_id):
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == from_user_id:
+            str_answer = "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
+            str_answer = str_answer + "👷 @" + str(record[Pk.USERNAME]) + "\n"
+            str_answer = str_answer + str(record[Pk.FIO]) + "\n\n"
+            str_answer = str_answer + str(record[Pk.COMPANY]) + "\n\n"
+            str_answer = str_answer + "#️⃣ " + str(record[Pk.GRZ_ZADACHA]) + "\n"
+            str_answer = str_answer + "#Парковка\n"
+            str_answer = str_answer + "#" + str(record[Pk.GRZ_TECH]) + "\n"
+            return str_answer
 
-    await message.answer("Введите размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer_rez(company))))))
-    await NomenclatureStates.WAIT_RAZMER.set()
-
-
-@dp.message_handler(state=NomenclatureStates.WAIT_RAZMER)
-async def nomenclature_razmer(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        await message.answer("Введите радиус:",
-                             reply_markup=getKeyboardList(key_radius))
-        await NomenclatureStates.WAIT_RADIUS.set()
-        return
-
-    razmer = message.text
-    await state.update_data(razmer=razmer)
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    await message.answer("Введите мaрку резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_marka_rez(company))))))
-    await NomenclatureStates.WAIT_MARKA_REZ.set()
-
-@dp.message_handler(state=NomenclatureStates.WAIT_MARKA_REZ)
-async def nomenclature_marka(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    if message.text == "Назад":
-        data = await state.get_data()
-        company = data.get("company", "")
-
-        await message.answer("Введите размер:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_razmer_rez(company))))))
-        await NomenclatureStates.WAIT_RAZMER.set()
-        return
-
-    marka = message.text
-    await state.update_data(marka=marka)
-
-    await message.answer("Введите модель резины:",
-                         reply_markup=getKeyboardList(key_exit))
-    await NomenclatureStates.WAIT_MODEL_REZ.set()
-
-@dp.message_handler(state=NomenclatureStates.WAIT_MODEL_REZ)
-async def nomenclature_model(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-
-        await message.answer("Введите мaрку резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_marka_rez(company))))))
-        await NomenclatureStates.WAIT_MARKA_REZ.set()
-        return
-
-    model = message.text
-    await state.update_data(model=model)
-
-    await message.answer("Введите сезонность резины:",
-                         reply_markup=getKeyboardList(sorted(list(set(get_list_sezon_rez(company))))))
-    await NomenclatureStates.WAIT_SEZON.set()
-
-@dp.message_handler(state=NomenclatureStates.WAIT_SEZON)
-async def nomenclature_sezon(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Введите модель резины:",
-                             reply_markup=getKeyboardList(key_exit))
-        await NomenclatureStates.WAIT_MODEL_REZ.set()
-        return
-
-    sezon = message.text
-    await state.update_data(sezon=sezon)
-
-    if company == "СитиДрайв":
-        await message.answer("Введите АЛ:",
-                             reply_markup=getKeyboardList(key_exit))
-        await NomenclatureStates.WAIT_AL.set()
-    else:
-        await generating_report_google_sheets_nomen(message, state)
-        await message.answer("Добавление новой номенклатуры выполнено", reply_markup=types.ReplyKeyboardRemove())
-        await cmd_update_data(message, state)
-
-@dp.message_handler(state=NomenclatureStates.WAIT_AL)
-async def nomenclature_al(message: types.Message, state: FSMContext):
-    if _check_exit(message):
-        await state.finish()
-        return
-
-    data = await state.get_data()
-    company = data.get("company", "")
-
-    if message.text == "Назад":
-        await message.answer("Введите сезонность резины:",
-                             reply_markup=getKeyboardList(sorted(list(set(get_list_sezon_rez(company))))))
-        await NomenclatureStates.WAIT_SEZON.set()
-        return
-
-    al = message.text
-    await state.update_data(al=al)
-
-    await generating_report_google_sheets_nomen(message, state)
-    await message.answer("Добавление новой номенклатуры выполнено", reply_markup=types.ReplyKeyboardRemove())
-    await cmd_update_data(message, state)
-
-async def generating_report_google_sheets_nomen(message: types.Message, state: FSMContext):
+def generating_report_gs_parking(from_user_id):
     tlist = list()
-    data = await state.get_data()
-    if data.get("company", "") == "СитиДрайв":
-        company = "Сити"
-        sheet = "Резина Сити"
-    elif data.get("company", "") == "Яндекс":
-        company = "Яндекс"
-        sheet = "Резина ЯД"
-    else:
-        company = "Белка"
-        sheet = "Резина Белка"
-    tlist.append("")
-    tlist.append(data.get("radius", ""))
-    tlist.append(data.get("razmer", ""))
-    tlist.append(data.get("sezon", ""))
-    tlist.append(data.get("marka", ""))
-    tlist.append(data.get("model", ""))
-    tlist.append(company)
-    tlist.append(data.get("al", ""))
-    try:
-        with_sheets_retry(
-            write_in_answers_ras_nomen,
-            tlist,
-            sheet,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось записать данные в базу знаний после 3 попыток")
+    for i, record in enumerate(pkrecords):
+        if record[Pk.USER_ID] == from_user_id:
+            tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
+            tlist.append(record[Pk.GRZ_TECH])
+            tlist.append(record[Pk.COMPANY])
+            tlist.append(record[Pk.GRZ_ZADACHA])
+            tlist.append(record[Pk.USERNAME])
+            tlist.append(record[Pk.FIO])
+            tlist.append(record[len(record) - 1])  # ссылка на отчет
+            write_answers_gs(tlist, "Городская парковка",gspread_url_rasxod_shm)
 
-@dp.message_handler(commands=["open_gate"], state="*")
-async def cmd_open_gate(message: types.Message, state: FSMContext):
-    if message.chat.type != 'private':
-        return await message.answer("Эта команда доступна только в личных сообщениях с ботом")
+@bot.message_handler(commands=['zapravka'])
+def zapravka(message):
+    global zprecords
+    for i, record in enumerate(zprecords):
+        if record[0] == message.from_user.id:
+            zprecords.remove(record)
+
+    # команда только в ЛС
+    if int(message.chat.id) < 0:
+        bot.reply_to(message, "Эта команда доступна только в личных сообщениях с ботом")
+        return
 
     user = message.from_user
-    logger.info(f"[open_gate] User @{user.username} ({user.id}) начал оформление открытие ворот")
-
-    await state.finish()
-    await state.update_data(user_id=user.id,username=user.username)
+    logger.info("[zapravka] start: @%s (%s)", user.username, user.id)
 
     try:
-        # 1) Получаем ФИО
+        # получаем ФИО
         resp = requests.get(
-            URL_GET_FIO,
-            json={"chat_id": str(user.id)},
+            urlSmallDtp,
+            params={"tg_chat_id": str(user.id)},
             timeout=5,
+            verify=False
         )
         rep = resp.json()
         fio = (rep.get("user") or {}).get("fullname") or "—"
-        await state.update_data(fio=fio)
+
+        # получаем задачи
+        resp = requests.get(
+            URL_GET_INFO_TASK,
+            params={"tg_chat_id": str(user.id)},
+            timeout=5,
+            verify=False
+        )
+        rep = resp.json()
+
+        if isinstance(rep, list):
+            tasks = rep
+        elif isinstance(rep, dict):
+            tasks = rep.get("active_tasks") or rep.get("tasks") or []
+        else:
+            tasks = []
+
+    except Exception as e:
+        logger.exception("Ошибка при запросе задач для zapravka: %s", e)
+        bot.send_message(message.chat.id, "Не удалось получить информацию по задачам. Попробуйте позже")
+        return
+
+    # Если задач нет
+    if not tasks:
+        if message.chat.id in list_users:
+            # тестовый режим
+            task = {
+                "task_type": "Перегон СШМ",
+                "carsharing__name": "Тестовая компания",
+                "car_plate": "Т000ТТ000",
+                "car_model": "TestCar",
+            }
+            tasks = [task]
+        else:
+            bot.send_message(message.chat.id, "У вас нет активной задачи")
+            return
+
+    # Если задача одна — старое поведение
+    if len(tasks) == 1:
+        task = tasks[0]
+        tlist = []
+        tlist.append(user.id)
+        tlist.append(user.username)
+        tlist.append(fio)
+        tlist.append(task.get("car_plate") or "—")
+        tlist.append(task.get("carsharing__name") or "—")
+        zprecords.append(tlist)
+        step3_zapravka(message)
+        return
+
+    # Если задач несколько — предлагаем выбор
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    buttons = []
+
+    for task in tasks:
+        plate = task.get("car_plate") or "—"
+        company = task.get("carsharing__name") or "—"
+        btn_text = f"{plate} | {company}"
+        buttons.append(btn_text)
+
+    # добавим кнопку выхода / отмены
+    cancel_text = "Выход"
+    buttons.append(cancel_text)
+
+    # разложим по строкам
+    for text in buttons:
+        kb.row(text)
+
+    msg = bot.send_message(
+        message.chat.id,
+        "У вас несколько активных задач.\nВыберите задачу для оформления заправки:",
+        reply_markup=kb
+    )
+    # передаём fio и сами tasks в следующий шаг
+    bot.register_next_step_handler(msg, step_select_task_zapravka, fio, tasks)
+
+def step_select_task_zapravka(message, fio, tasks):
+    global zprecords
+
+    text = (message.text or "").strip()
+
+    # обработка отмены
+    if text.lower() == "выход":
+        bot.send_message(
+            message.chat.id,
+            "Оформление заправки отменено",
+            reply_markup=telebot.types.ReplyKeyboardRemove()
+        )
+        return
+
+    # ищем задачу по тексту кнопки
+    selected_task = None
+    for task in tasks:
+        plate = task.get("car_plate") or "—"
+        company = task.get("carsharing__name") or "—"
+        btn_text = f"{plate} | {company}"
+        if text == btn_text:
+            selected_task = task
+            break
+
+    # если ввели что-то своё, а не нажали кнопку
+    if selected_task is None:
+        kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        for task in tasks:
+            plate = task.get("car_plate") or "—"
+            company = task.get("carsharing__name") or "—"
+            kb.row(f"{plate} | {company}")
+        kb.row("Выход")
+
+        bot.send_message(
+            message.chat.id,
+            "Пожалуйста, выберите задачу, нажав на кнопку из списка",
+            reply_markup=kb
+        )
+        bot.register_next_step_handler(message, step_select_task_zapravka, fio, tasks)
+        return
+
+    # формируем запись, как раньше
+    user = message.from_user
+    tlist = []
+    tlist.append(user.id)
+    tlist.append(user.username)
+    tlist.append(fio)
+    tlist.append(selected_task.get("car_plate") or "—")
+    tlist.append(selected_task.get("carsharing__name") or "—")
+    zprecords.append(tlist)
+
+    bot.send_message(
+        message.chat.id,
+        "Задача выбрана",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
+    step3_zapravka(message)
+
+def step3_zapravka(message, nazad=0):
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == message.from_user.id:
+            bot.send_message(message.chat.id, f"Активная задача:\nГРЗ технички: {record[Zp.GRZ_TECH]}\nКомпания: {record[Zp.COMPANY]}\nУкажите показания одометра:",reply_markup=getKeyboardStep1(key_exit))
+            bot.register_next_step_handler(message, step4_zapravka)
+
+def step4_zapravka(message, nazad=0):
+    global zprecords
+    if check_exit(message, 1):
+        return
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == message.from_user.id:
+            raw = message.text.strip().replace(",", ".")
+            try:
+                summa = float(raw)
+            except ValueError:
+                bot.send_message(
+                    message.chat.id,
+                    "Введите значение в формате 101.11 или 101,11",
+                    reply_markup=getKeyboardList(key_exit)
+                )
+                bot.register_next_step_handler(message, step4_zapravka)
+                return
+
+            record.append(summa)
+            bot.send_message(message.chat.id, "Укажите сумму заправки:",reply_markup=getKeyboardList(key_exit))
+            bot.register_next_step_handler(message, step5_zapravka)
+
+def step5_zapravka(message, nazad=0):
+    global zprecords
+    if check_exit(message, 1):
+        return
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                zprecords.remove(record)
+                zapravka(message)
+                return
+            if nazad == 0:
+                raw = message.text.strip().replace(",", ".")
+                try:
+                    summa = float(raw)
+                except ValueError:
+                    bot.send_message(
+                        message.chat.id,
+                        "Введите значение в формате 101.11 или 101,11",
+                        reply_markup=getKeyboardList(key_exit)
+                    )
+                    bot.register_next_step_handler(message, step5_zapravka)
+                    return
+
+                record.append(summa)
+
+            bot.send_message(message.chat.id, "Добавьте скриншот из приложения ППР, фото приборной панели ДО и ПОСЛЕ заправки",
+                             reply_markup=telebot.types.ReplyKeyboardRemove())
+
+def generating_report_zapravka(message):
+    time.sleep(2)
+    global zprecords
+    media = []
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == message.chat.id:
+            try:
+                if len(record) < Zp.TIP_DOCUMENT + 4:
+                    record.append(1)
+                    bot.send_message(message.chat.id, "Прикрепите еще фото")
+                    return
+                for i, img in enumerate(record[Zp.TIP_DOCUMENT + 1:]):
+                    if i < 3:
+                        media.append(dict(type=str(record[Zp.TIP_DOCUMENT]), media=f'{img}'))
+                media[0]['caption'] = generating_report_tg_zapravka(message.chat.id)
+                if record[Pk.COMPANY] == "СитиДрайв":
+                    chatId = chat_id_Sity
+                    chat_id_for_link = link_Sity
+                    thread_id = thread_id_Sity_zapr
+                elif record[Pk.COMPANY] == "Яндекс":
+                    chatId = chat_id_Yandex
+                    chat_id_for_link = link_Yandex
+                    thread_id = thread_id_Yandex_zapr
+                else:
+                    chatId = chat_id_Belka
+                    chat_id_for_link = link_Belka
+                    thread_id = thread_id_Belka_zapr
+                dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(media)}
+                #dataSendMediaGroup = {'chat_id': str(chatId),'media': json.dumps(media)}
+                resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                data = resp.json()
+                #message_id = 11
+                message_id = data["result"][0]["message_id"]
+                message_link = f"https://t.me/c/{chat_id_for_link}/{message_id}"
+                record.append(message_link)
+                generating_report_gs_zapravka(message.chat.id)
+                if resp.status_code < 400:
+                    bot.send_message(message.chat.id, 'Ваша заявка сформирована')
+                else:
+                    bot.send_message(message.chat.id, 'При формировании заявки произошла ошибка')
+                zprecords.remove(record)
+                return
+            except Exception as e:
+                zprecords.remove(record)
+                logging.exception(e)
+                bot.send_message(message.chat.id, "Возникла ошибка. Обратитесь к разработчикам",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
+
+def generating_report_tg_zapravka(from_user_id):
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == from_user_id:
+            str_answer = "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
+            str_answer = str_answer + "👷 @" + str(record[Zp.USERNAME]) + "\n"
+            str_answer = str_answer + str(record[Zp.FIO]) + "\n\n"
+            str_answer = str_answer + "#" + str(record[Zp.GRZ_TECH]) + "\n"
+            str_answer = str_answer + str(record[Zp.COMPANY]) + "\n\n"
+            str_answer = str_answer + str(record[Zp.PROBEG]) + "\n"
+            str_answer = str_answer + str(record[Zp.SUMMA]) + "\n"
+            str_answer = str_answer + "#Заправка\n"
+            return str_answer
+
+def generating_report_gs_zapravka(from_user_id):
+    tlist = list()
+    for i, record in enumerate(zprecords):
+        if record[Zp.USER_ID] == from_user_id:
+            tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
+            tlist.append(record[Zp.GRZ_TECH])
+            tlist.append(record[Zp.COMPANY])
+            tlist.append(record[Zp.PROBEG])
+            tlist.append(record[Zp.SUMMA])
+            tlist.append(record[Zp.USERNAME])
+            tlist.append(record[Zp.FIO])
+            tlist.append(record[len(record) - 1])  # ссылка на отчет
+            write_answers_gs(tlist, "Заправка техничек",gspread_url_rasxod_shm)
+
+# Сценарий "Расход"
+@bot.message_handler(commands=['expense'])
+def expense(message):
+    global rsrecords
+    # чистим старую сессию пользователя
+    for i, record in enumerate(rsrecords):
+        if record[0] == message.from_user.id:
+            rsrecords.remove(record)
+
+    # команда только в ЛС
+    if int(message.chat.id) < 0:
+        bot.reply_to(message, "Эта команда доступна только в личных сообщениях с ботом")
+        return
+
+    user = message.from_user
+    logger.info("[expense] start: @%s (%s)", user.username, user.id)
+
+    try:
+        # получаем ФИО
+        resp = requests.get(
+            urlSmallDtp,
+            params={"tg_chat_id": str(user.id)},
+            timeout=5,
+            verify=False
+        )
+        rep = resp.json()
+        fio = (rep.get("user") or {}).get("fullname") or "—"
+
+        # получаем задачи
+        resp = requests.get(
+            URL_GET_INFO_TASK,
+            params={"tg_chat_id": str(user.id)},
+            timeout=5,
+            verify=False
+        )
+        rep = resp.json()
+
+        if isinstance(rep, list):
+            tasks = rep
+        elif isinstance(rep, dict):
+            tasks = rep.get("active_tasks") or rep.get("tasks") or []
+        else:
+            tasks = []
+
+    except Exception as e:
+        logger.exception("Ошибка при запросе задач для expense: %s", e)
+        bot.send_message(message.chat.id, "Не удалось получить информацию по задачам. Попробуйте позже")
+        return
+
+    # Если задач нет
+    if not tasks:
+        if message.chat.id in list_users:
+            # тестовый режим
+            task = {
+                "task_type": "Перегон СШМ",
+                "carsharing__name": "Тестовая компания",
+                "car_plate": "Т000ТТ000",
+                "car_model": "TestCar",
+            }
+            tasks = [task]
+        else:
+            bot.send_message(message.chat.id, "У вас нет активной задачи")
+            return
+
+    # Если задача одна — старое поведение
+    if len(tasks) == 1:
+        task = tasks[0]
+        tlist = []
+        tlist.append(user.id)
+        tlist.append(user.username)
+        tlist.append(fio)
+        tlist.append(task.get("car_plate") or "—")
+        tlist.append(task.get("carsharing__name") or "—")
+        rsrecords.append(tlist)
+        step3_expense(message)
+        return
+
+    # Если задач несколько — предлагаем выбор
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    buttons = []
+
+    for task in tasks:
+        plate = task.get("car_plate") or "—"
+        company = task.get("carsharing__name") or "—"
+        btn_text = f"{plate} | {company}"
+        buttons.append(btn_text)
+
+    cancel_text = "Выход"
+    buttons.append(cancel_text)
+
+    for text in buttons:
+        kb.row(text)
+
+    msg = bot.send_message(
+        message.chat.id,
+        "У вас несколько активных задач.\nВыберите задачу для оформления расхода:",
+        reply_markup=kb
+    )
+    # передаём fio и tasks в следующий шаг
+    bot.register_next_step_handler(msg, step_select_task_expense, fio, tasks)
+
+def step_select_task_expense(message, fio, tasks):
+    global rsrecords
+
+    text = (message.text or "").strip()
+
+    # обработка отмены
+    if text.lower() == "выход":
+        bot.send_message(
+            message.chat.id,
+            "Оформление расхода отменено",
+            reply_markup=telebot.types.ReplyKeyboardRemove()
+        )
+        return
+
+    # ищем задачу по тексту кнопки
+    selected_task = None
+    for task in tasks:
+        plate = task.get("car_plate") or "—"
+        company = task.get("carsharing__name") or "—"
+        btn_text = f"{plate} | {company}"
+        if text == btn_text:
+            selected_task = task
+            break
+
+    # если пользователь ввёл произвольный текст, а не нажал кнопку
+    if selected_task is None:
+        kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        for task in tasks:
+            plate = task.get("car_plate") or "—"
+            company = task.get("carsharing__name") or "—"
+            kb.row(f"{plate} | {company}")
+        kb.row("Выход")
+
+        bot.send_message(
+            message.chat.id,
+            "Пожалуйста, выберите задачу, нажав на кнопку из списка",
+            reply_markup=kb
+        )
+        bot.register_next_step_handler(message, step_select_task_expense, fio, tasks)
+        return
+
+    # формируем запись так же, как раньше
+    user = message.from_user
+    tlist = []
+    tlist.append(user.id)
+    tlist.append(user.username)
+    tlist.append(fio)
+    tlist.append(selected_task.get("car_plate") or "—")
+    tlist.append(selected_task.get("carsharing__name") or "—")
+    rsrecords.append(tlist)
+
+    # убираем клавиатуру и идём в обычный сценарий
+    bot.send_message(
+        message.chat.id,
+        "Задача выбрана",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
+    step3_expense(message)
+
+
+def step3_expense(message, nazad=0):
+    global rsrecords
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            bot.send_message(message.chat.id, f"Активная задача:\nГРЗ технички: {record[Zp.GRZ_TECH]}\nКомпания: {record[Zp.COMPANY]}\nВыберите город из списка или введите вручную:",reply_markup=getKeyboardStep1(key_sity))
+            bot.register_next_step_handler(message, step4_expense)
+
+def step4_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if not nazad:
+                record.append(message.text)
+            bot.send_message(message.chat.id, "Начните ввод госномера задачи:", reply_markup=getKeyboardList(key_exit))
+            bot.register_next_step_handler(message, step5_expense)
+
+def step5_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                rsrecords.remove(record)
+                expense(message)
+                return
+            grz_ts = getGRZTs(record, (message.text).lower(), Rs)
+            if len(grz_ts):
+                bot.send_message(message.chat.id, "Подтвердите ГРЗ из списка:", reply_markup=getKeyboardList(sorted(grz_ts)))
+                bot.register_next_step_handler(message, step6_expense)
+            else:
+                bot.send_message(message.chat.id, "В базе данных нет введенного вами ГРЗ. Попробуйте снова", reply_markup=getKeyboardStep1(key_exit))
+                bot.register_next_step_handler(message, step5_expense)
+
+def step6_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step4_expense(message, 1)
+                return
+            record.append(message.text)
+            bot.send_message(message.chat.id, "Введите сумму с 2 знаками после точки, пример: 5678.91",
+                             reply_markup=getKeyboardList(key_exit))
+            bot.register_next_step_handler(message, step7_expense)
+
+def step7_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step4_expense(message, 1)
+                return
+            try:
+                if nazad == 0:
+                    summa = float(message.text)
+                    record.append(summa)
+                bot.send_message(message.chat.id, 'Способ оплаты', reply_markup=getKeyboardList(key_oplata))
+                bot.register_next_step_handler(message, step8_expense)
+            except Exception as e:
+                    bot.send_message(message.chat.id, "Введите сумму с 2 знаками после точки, пример: 5678.91",
+                                     reply_markup=getKeyboardList(key_exit))
+                    bot.register_next_step_handler(message, step7_expense)
+
+def step8_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step6_expense(message, 1)
+                return
+            if nazad == 0:
+                check = 0
+                if message.text in key_oplata:
+                    record.append(message.text)
+                    check = 1
+                if check == 0:
+                    bot.send_message(message.chat.id, 'Вы ввели способ оплаты не из предложенного списка\nПопробуйте еще раз:',
+                    reply_markup=getKeyboardList(key_oplata))
+                    bot.register_next_step_handler(message, step8_expense)
+                    return
+            if record[Rs.OPLATA] == "Наличные <> Перевод <> Личная карта":
+                bot.send_message(message.chat.id, 'Выберите из следующих категорий', reply_markup=getKeyboardList(key_oplata_dop))
+                bot.register_next_step_handler(message, step9_expense)
+            else:
+                bot.send_message(message.chat.id, "Укажите причину расхода", reply_markup=getKeyboardList(key_exit))
+                bot.register_next_step_handler(message, step10_expense)
+
+def step9_expense(message, nazad=0):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and nazad == 0:
+                record.pop(len(record) - 1)
+                step7_expense(message, 1)
+                return
+            if nazad == 0:
+                record.append(message.text)
+            bot.send_message(message.chat.id, "Укажите причину расхода", reply_markup=getKeyboardList(key_exit))
+            bot.register_next_step_handler(message, step10_expense)
+
+def step10_expense(message):
+    global rsrecords
+    if check_exit(message, 2):
+        return
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.from_user.id:
+            if message.text == "Назад" and record[Rs.OPLATA] == "Наличные <> Перевод <> Личная карта":
+                record.pop(len(record) - 1)
+                step8_expense(message, 1)
+                return
+            if message.text == "Назад" and record[Rs.OPLATA] == "Бизнес-карта":
+                record.pop(len(record) - 1)
+                step7_expense(message, 1)
+                return
+            if record[Rs.OPLATA] == "Бизнес-карта":
+                record.append("")
+            record.append(message.text)
+            bot.send_message(message.chat.id, "Загрузите фото чека/счета (от 1 до 4 фото) в одном сообщении", reply_markup=telebot.types.ReplyKeyboardRemove())
+
+def generating_report_expense(message):
+    time.sleep(2)
+    global rsrecords
+    media = []
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == message.chat.id:
+            try:
+                for i, img in enumerate(record[Rs.TIP_DOCUMENT + 1:]):
+                    if i < 4:
+                        media.append(dict(type=str(record[Rs.TIP_DOCUMENT]), media=f'{img}'))
+                media[0]['caption'] = generating_report_tg_expense(message.chat.id)
+                if record[Rs.COMPANY] == "СитиДрайв":
+                    chatId = chat_id_Sity
+                    thread_id = thread_id_Sity_ras
+                elif record[Rs.COMPANY] == "Яндекс":
+                    chatId = chat_id_Yandex
+                    thread_id = thread_id_Yandex_ras
+                else:
+                    chatId = chat_id_Belka
+                    thread_id = thread_id_Belka_ras
+                dataSendMediaGroup = {'chat_id': str(chatId), 'message_thread_id': str(thread_id), 'media': json.dumps(media)}
+                #dataSendMediaGroup = {'chat_id': str(chatId),'media': json.dumps(media)}
+                resp = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                dataSendMediaGroup = {'chat_id': str(chat_id_common),'media': json.dumps(media)}
+                resp_common = requests.post(urlSendMediaGroup, data=dataSendMediaGroup)
+                generating_report_gs_expense(message.chat.id)
+                if resp.status_code < 400 and resp_common.status_code < 400:
+                    bot.send_message(message.chat.id, 'Ваша заявка сформирована')
+                else:
+                    bot.send_message(message.chat.id, 'При формировании заявки произошла ошибка')
+                rsrecords.remove(record)
+                return
+            except Exception as e:
+                rsrecords.remove(record)
+                logging.exception(e)
+                bot.send_message(message.chat.id, "Возникла ошибка. Обратитесь к разработчикам",
+                                 reply_markup=telebot.types.ReplyKeyboardRemove())
+
+def generating_report_tg_expense(from_user_id):
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == from_user_id:
+            str_answer = "⌚️ " + str((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")) + "\n\n"
+            str_answer = str_answer + "👷 @" + str(record[Rs.USERNAME]) + "\n"
+            str_answer = str_answer + str(record[Rs.FIO]) + "\n\n"
+            str_answer = str_answer + str(record[Rs.GOROD]) + "\n"
+            str_answer = str_answer + "ШМ\n"
+            str_answer = str_answer + str(record[Rs.SUMMA]) + "\n"
+            if str(record[Rs.DOP_OPLATA]) == "Подача на возмещение(свои деньги) + 6%":
+                str_answer = str_answer + str(round(record[Rs.SUMMA]/94*100,2)).replace(".", ",") + "\n\n"
+            str_answer = str_answer + str(record[Rs.COMPANY]) + "\n"
+            str_answer = str_answer + str(record[Rs.OPLATA]) + "\n"
+            str_answer = str_answer + str(record[Rs.PRICIHA]) + "\n\n"
+            str_answer = str_answer + "#" + str(record[Rs.GRZ_TECH]) + "\n"
+            str_answer = str_answer + str(record[Rs.GRZ_ZADACHA]) + "\n"
+            if str(record[Rs.DOP_OPLATA]) == "Подача на возмещение(свои деньги) + 6%":
+                str_answer = str_answer + "\n@Anastasiya_CleanCar, cогласуйте, пожалуйста"
+            return str_answer
+
+def generating_report_gs_expense(from_user_id):
+    tlist = list()
+    for i, record in enumerate(rsrecords):
+        if record[Rs.USER_ID] == from_user_id:
+            tlist.append((datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S"))
+            tlist.append(record[Rs.FIO])
+            tlist.append(record[Rs.USERNAME])
+            tlist.append(record[Rs.GOROD])
+            tlist.append(record[Rs.SUMMA])
+            if str(record[Rs.DOP_OPLATA]) == "Подача на возмещение(свои деньги) + 6%":
+                tlist.append(str(round(record[Rs.SUMMA]/94*100,2)).replace(".", ","))
+            else:
+                tlist.append("")
+            tlist.append("КлинКар Сервис")
+            tlist.append("ШМ")
+            tlist.append(record[Rs.OPLATA])
+            tlist.append(record[Rs.DOP_OPLATA])
+            tlist.append(record[Rs.PRICIHA])
+            tlist.append(record[Rs.GRZ_TECH])
+            tlist.append(record[Rs.GRZ_ZADACHA])
+            write_answers_gs(tlist, "Лист1",gspread_url_rasxod)
+# -----------------------------------------------------------------------------------------------------
+# Keyboar
+# -----------------------------------------------------------------------------------------------------
+def getKeyboardList(record_list):
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for record in record_list:
+        keyboard.row(telebot.types.KeyboardButton(text=str(record)))
+    keyboard.row(telebot.types.KeyboardButton(text="Назад"), telebot.types.KeyboardButton(text="Выход"))
+    return keyboard
+
+def show_xab_page(message, user_id, start_over=False):
+    state = xab_pages.get(user_id)
+    if not state:
+        return
+
+    per_page = XAB_PER_PAGE
+    n = len(state["options"])
+    if n == 0:
+        bot.send_message(message.chat.id,
+            "В хабе нет выбранного варианта, выберете другой вариант:",
+            reply_markup=getKeyboardList(key_type))
+        return
+
+    page = 0 if start_over else state.get("page", 0)
+    max_page = (n - 1) // per_page
+    page = max(0, min(page, max_page))
+    state["page"] = page
+
+    start = page * per_page
+    end = min(start + per_page, n)
+    slice_opts = list(state["options"][start:end])
+
+    # добавляем кнопку «Ещё», если дальше есть позиции
+    if end < n:
+        slice_opts.append("Ещё")
+
+    kb = getKeyboardList(slice_opts)
+    bot.send_message(message.chat.id,
+        "Выберите вариант из предложенных:",
+        reply_markup=kb)
+
+
+def getKeyboardStep1(record_list):
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for record in record_list:
+        keyboard.row(telebot.types.KeyboardButton(text=str(record)))
+    keyboard.row(telebot.types.KeyboardButton(text="Выход"))
+    return keyboard
+
+
+# -----------------------------------------------------------------------------------------------------
+# Functions
+# -----------------------------------------------------------------------------------------------------
+def _is_retryable_http_status(status: int) -> bool:
+    # 429 Too Many Requests и любые 5xx — пробуем повторить
+    return status == 429 or (500 <= status <= 599)
+
+def _sleep_with_jitter(base_delay: float, attempt: int) -> None:
+    # экспоненциальный backoff + небольшой джиттер
+    delay = base_delay * (2 ** (attempt - 1))
+    delay = delay + random.uniform(0, 0.2)  # 0–200 мс джиттер
+    time.sleep(delay)
+
+def gspread_open_by_url_with_retry(url: str, max_retries: int = 5) -> Spreadsheet:
+    """
+    Открывает таблицу с повторами на 429/5xx (APIError).
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            gc: Client = gspread.service_account("app/creds.json")
+            return gc.open_by_url(url)
+        except APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("open_by_url retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)
+                last_exc = e
+                continue
+            last_exc = e
+            break
+        except Exception as e:
+            last_exc = e
+            break
+    raise last_exc
+
+def worksheet_get_all_values_with_retry(ws, max_retries: int = 5):
+    """
+    ws.get_all_values() с повторами на 429/5xx.
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return ws.get_all_values()
+        except APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("get_all_values retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)
+                last_exc = e
+                continue
+            last_exc = e
+            break
+        except Exception as e:
+            last_exc = e
+            break
+    raise last_exc
+
+def worksheet_append_rows_with_retry(ws, rows: list, max_retries: int = 5):
+    """
+    ws.append_rows(...) с повторами на 429/5xx.
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            ws.append_rows(rows, value_input_option='USER_ENTERED',
+                           table_range='A1', insert_data_option='INSERT_ROWS')
+            return
+        except APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("append_rows retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)
+                last_exc = e
+                continue
+            last_exc = e
+            break
+        except Exception as e:
+            last_exc = e
+            break
+    raise last_exc
+
+def worksheet_append_row_with_retry(ws, row: list, max_retries: int = 5):
+    """
+    ws.append_row(...) с повторами на 429/5xx.
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            ws.append_row(row, value_input_option='USER_ENTERED',
+                          table_range='A1', insert_data_option='INSERT_ROWS')
+            return
+        except APIError as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("append_row retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)
+                last_exc = e
+                continue
+            last_exc = e
+            break
+        except Exception as e:
+            last_exc = e
+            break
+    raise last_exc
+
+def gs_values_batch_update_with_retry(sh: Spreadsheet, data_payload: list, max_retries: int = 5) -> None:
+    """
+    Обёртка над Spreadsheet.values_batch_update с retry/backoff на 429/5xx.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            sh.values_batch_update({
+                "valueInputOption": "USER_ENTERED",
+                "data": data_payload
+            })
+            return
+        except Exception as e:
+            # gspread APIError имеет response с status_code; requests.HTTPError тоже может содержать код
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is None:
+                # попробуем вытащить код глубже (иногда gspread его вкладывает внутрь)
+                status = getattr(getattr(getattr(e, "response", None), "status", None), "code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("values_batch_update retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)  # 0.5, 1.0, 2.0, ...
+                continue
+            logger.exception("values_batch_update failed (no retry or maxed out): %s", e)
+            raise
+
+def gs_batch_update_with_retry(sh: Spreadsheet, requests_body: list, max_retries: int = 5) -> None:
+    """
+    Обёртка над Spreadsheet.batch_update с retry/backoff на 429/5xx.
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            sh.batch_update({"requests": requests_body})
+            return
+        except Exception as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status is None:
+                status = getattr(getattr(getattr(e, "response", None), "status", None), "code", None)
+            if status is not None and _is_retryable_http_status(int(status)) and attempt < max_retries:
+                logger.warning("batch_update retry %d due to HTTP %s", attempt, status)
+                _sleep_with_jitter(0.5, attempt)
+                continue
+            logger.exception("batch_update failed (no retry or maxed out): %s", e)
+            raise
+
+def write_answers_gs_rows(tlist, name_gs, url_gs):
+    try:
+        sh: Spreadsheet = gspread_open_by_url_with_retry(url_gs)
+        ws = sh.worksheet(name_gs)
+        worksheet_append_rows_with_retry(ws, tlist)
+    except Exception as e:
+        logger.exception(
+            "Ошибка выполнения write_answers_gs_rows: name_gs=%s url_gs=%s tlist=%s",
+            name_gs, url_gs, tlist
+        )
+        try:
+            bot.send_message(
+                547087397,
+                f"write_answers_gs_rows упала:\n{name_gs}\n{url_gs}\n{e}"
+            )
+        except Exception:
+            pass
+
+def write_open_gate_row(fio: str, car_plate: str, company: str, message_link: str) -> None:
+    try:
+        sh: Spreadsheet = gspread_open_by_url_with_retry(gspread_url_gates)
+        ws = sh.worksheet("Выгрузка Техники")
+        now_msk = datetime.now() + timedelta(hours=3)
+        row = [
+            now_msk.strftime("%d.%m.%Y"),  # Дата
+            now_msk.strftime("%H:%M:%S"),  # Время
+            fio,
+            car_plate,
+            company,
+            message_link,
+        ]
+        ws.append_row(row, value_input_option='USER_ENTERED', table_range='A1', insert_data_option='INSERT_ROWS')
+    except Exception as e:
+        logger.exception("Ошибка выполнения write_open_gate_row")
+
+_DT_FORMATS = ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M")
+
+def _parse_dt_ru(s: str) -> datetime:
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in _DT_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+def find_logistics_rows(limit_hours: int = 12) -> tuple[list[str], list[str]]:
+    sh: Spreadsheet = gspread_open_by_url_with_retry(URL_GOOGLE_SHEETS_CHART)
+    ws = sh.worksheet("Логисты выход на смену")
+    rows = ws.get_all_values()
+    if not rows:
+        return [], []
+    header, data = rows[0], rows[1:]
+    def col_idx(name: str) -> int:
+        try:
+            return [h.strip().lower() for h in header].index(name.lower())
+        except ValueError:
+            return -1
+
+    i_fio   = col_idx("ФИО")
+    i_tag   = col_idx("Тег")
+    i_dir   = col_idx("Направление")
+    i_start = col_idx("Время начала смены")
+    i_end   = col_idx("Время конца смены")
+
+    if min(i_fio, i_tag, i_dir, i_start, i_end) < 0:
+        return [], []
+
+    now = datetime.now(timezone(timedelta(hours=3))).replace(tzinfo=None)  # сравниваем как наивные в МСК
+    window = timedelta(hours=limit_hours)
+
+    tags: list[str] = []
+    fios: list[str] = []
+
+    for row in data:
+        # Защита от коротких строк
+        if max(i_fio, i_tag, i_dir, i_start, i_end) >= len(row):
+            continue
+
+        direction = row[i_dir].strip()
+        if direction != "ВШМ":
+            continue
+
+        end_time_raw = row[i_end].strip()
+        if end_time_raw:  # конец смены уже заполнен
+            continue
+
+        start_dt = _parse_dt_ru(row[i_start])
+        if not start_dt:
+            continue
+
+        # Начало смены не старше limit_hours от текущего времени
+        if now - start_dt <= window and now >= start_dt:
+            tags.append(row[i_tag].strip())
+            fios.append(row[i_fio].strip())
+
+    return tags, fios
+
+def write_answers_gs(tlist, name_gs, url_gs):
+    try:
+        sh: Spreadsheet = gspread_open_by_url_with_retry(url_gs)
+        ws = sh.worksheet(name_gs)
+        worksheet_append_row_with_retry(ws, tlist)
+    except Exception as e:
+        logger.exception(
+            "Ошибка выполнения write_answers_gs: name_gs=%s url_gs=%s tlist=%s",
+            name_gs, url_gs, tlist
+        )
+        try:
+            bot.send_message(
+                547087397,
+                f"write_answers_gs упала:\n{name_gs}\n{url_gs}\n{e}"
+            )
+        except Exception:
+            pass
+
+
+def getGRZTech():
+    sh: Spreadsheet = gspread_open_by_url_with_retry(gspread_url_baza_zn)
+    ws = sh.worksheet("Наши технички")
+    list_of_lists = worksheet_get_all_values_with_retry(ws)[1:]
+    grz = list()
+    for tlist in list_of_lists:
+        grz.append(str(tlist[1]))
+    return grz
+def getGRZTs(record, input_grz, Cl):
+    grz = list()
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = grz_ts_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = grz_ts_ya
+    else:
+        lst = grz_ts_blk
+    for i,string in enumerate(lst):
+        if string.startswith(input_grz):
+            grz.append(string)
+    return grz
+
+
+def check_exit(message, typ):
+    if message.text == "Выход":
+        if typ == 0:
+            global pkrecords
+            for i, record in enumerate(pkrecords):
+                if record[Pk.USER_ID] == message.from_user.id:
+                    bot.send_message(message.chat.id, "Оформление заявки завершено",
+                                     reply_markup=telebot.types.ReplyKeyboardRemove())
+                    pkrecords.remove(record)
+                    return 1
+        elif typ == 1:
+            global zprecords
+            for i, record in enumerate(zprecords):
+                if record[Zp.USER_ID] == message.from_user.id:
+                    bot.send_message(message.chat.id, "Оформление заявки завершено",
+                                     reply_markup=telebot.types.ReplyKeyboardRemove())
+                    zprecords.remove(record)
+                    return 1
+        elif typ == 2:
+            global rsrecords
+            for i, record in enumerate(rsrecords):
+                if record[Rs.USER_ID] == message.from_user.id:
+                    bot.send_message(message.chat.id, "Оформление заявки завершено",
+                                     reply_markup=telebot.types.ReplyKeyboardRemove())
+                    rsrecords.remove(record)
+                    return 1
+        elif typ == 3:
+            global mvrecords
+            for i, record in enumerate(mvrecords):
+                if record[Mv.USER_ID] == message.from_user.id:
+                    bot.send_message(message.chat.id, "Оформление заявки завершено",
+                                     reply_markup=telebot.types.ReplyKeyboardRemove())
+                    mvrecords.remove(record)
+                    release_cache( message.from_user.id)
+                    return 1
+
+def check_validation_grz(record, Cl):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = grz_ts_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = grz_ts_ya
+    else:
+        lst = grz_ts_blk
+    return check_grz(lst, record, Cl)
+
+
+def check_grz(bz_znan, record, Cl):
+    for i, rez in enumerate(bz_znan):
+        if str(record[Cl.GRZ_ZADACHA]).strip() == str(rez).strip():
+            return 1
+
+def check_validation_grz_tech(record, number):
+    for i, rez in enumerate(grz_tech):
+        if str(record[number]) == str(rez).strip():
+            return 1
+    return 0
+def check_validation_marka_ts(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = marka_ts_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = marka_ts_ya
+    else:
+        lst = marka_ts_blk
+    return check_marka_ts(lst, cur_record)
+
+
+def check_marka_ts(baza_zn, cur_record):
+    for i, rez in enumerate(baza_zn):
+        if str(cur_record[Rc.MARKA_TS]).strip() == str(rez).strip():
+            return 1
+    return 0
+
+def check_validation_radius(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = list_rez_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = list_rez_ya
+    else:
+        lst = list_rez_blk
+    return check_radius(lst, cur_record)
+
+def check_radius(bz_znan, record):
+    for i, rez in enumerate(bz_znan):
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip():
+            return 1
+
+
+def check_validation_razmer(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = list_rez_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = list_rez_ya
+    else:
+        lst = list_rez_blk
+    return check_razmer(lst, cur_record)
+
+
+def check_razmer(bz_znan, record):
+    for i, rez in enumerate(bz_znan):
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip():
+            return 1
+
+def check_validation_marka(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = list_rez_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = list_rez_ya
+    else:
+        lst = list_rez_blk
+    return check_marka(lst, cur_record)
+
+
+def check_marka(bz_znan, record):
+    for i, rez in enumerate(bz_znan):
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip() and str(record[Rc.MARKA_REZ]) == str(rez[4]).strip():
+            return 1
+
+
+def check_validation_model(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        lst = list_rez_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        lst = list_rez_ya
+    else:
+        lst = list_rez_blk
+    return check_model(lst, cur_record)
+
+
+def check_model(bz_znan, record):
+    for i, rez in enumerate(bz_znan):
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip() and str(record[Rc.MARKA_REZ]) == str(rez[4]).strip() and str(record[Rc.MODEL_REZ]) == str(rez[5]).strip():
+            return 1
+
+def postpone_build(message, record, typ):
+    bot.send_message(message.chat.id,"Введён параметр не из предложенных вариантов. Обратитесь к [Сергею](tg://user?id=1050518459) для обновления базы", parse_mode = "Markdown",reply_markup = telebot.types.ReplyKeyboardRemove())
+    if typ == 0:
+        global pkrecords
+        pkrecords.remove(record)
+    if typ == 1:
+        global rsrecords
+        rsrecords.remove(record)
+    if typ == 2:
+        global mvrecords
+        mvrecords.remove(record)
+
+
+def loading_grz_is_Google_Sheets():
+    global grz_ts_st
+    grz_ts_st = loading_bz_znaniya_grz("Перечень ТС Сити")
+    global grz_ts_ya
+    grz_ts_ya = loading_bz_znaniya_grz("Перечень ТС Яд")
+    global grz_ts_blk
+    grz_ts_blk = loading_bz_znaniya_grz("Перечень ТС Белка")
+    global marka_ts_st
+    marka_ts_st = loading_bz_znaniya_marka("Перечень ТС Сити", 2)
+    global marka_ts_ya
+    marka_ts_ya = loading_bz_znaniya_marka("Перечень ТС Яд", 3)
+    global marka_ts_blk
+    marka_ts_blk = loading_bz_znaniya_marka("Перечень ТС Белка", 1)
+    global list_rez_st
+    list_rez_st = loading_bz_znaniya_rezina("Резина Сити")
+    global list_rez_ya
+    list_rez_ya = loading_bz_znaniya_rezina("Резина ЯД")
+    global list_rez_blk
+    list_rez_blk = loading_bz_znaniya_rezina("Резина Белка")
+    global grz_tech
+    grz_tech = getGRZTech()
+
+def loading_bz_znaniya_grz(company):
+    sh: Spreadsheet = gspread_open_by_url_with_retry(gspread_url_baza_zn)
+    ws_direct = sh.worksheet(company)
+    list_of_lists = worksheet_get_all_values_with_retry(ws_direct)[1:]
+    grz = list()
+    if company == "Перечень ТС Белка":
+        index = 2
+    else:
+        index = 0
+    for tlist in list_of_lists:
+        grz.append(str(tlist[index]))
+    return grz
+
+def loading_bz_znaniya_marka(company, nomer):
+    sh: Spreadsheet = gspread_open_by_url_with_retry(gspread_url_baza_zn)
+    ws_direct = sh.worksheet(company)
+    list_of_lists = worksheet_get_all_values_with_retry(ws_direct)[1:]
+    marka = list()
+    for tlist in list_of_lists:
+        marka.append(str(tlist[nomer]))
+    return sorted(list(set(marka)))
+
+def loading_bz_znaniya_rezina(company):
+    sh: Spreadsheet = gspread_open_by_url_with_retry(gspread_url_baza_zn)
+    ws_direct = sh.worksheet(company)
+    list_of_lists = worksheet_get_all_values_with_retry(ws_direct)[1:]
+    return list_of_lists
+
+
+def load_xab_cache():
+    global global_xab_cache
+    # Загрузка кэша из Google Таблицы (как у вас уже реализовано)
+    sh = gspread_open_by_url_with_retry(gspread_url_peremeshenie)
+    ws_direct = sh.worksheet("Онлайн остатки Хаба")
+    list_of_lists = worksheet_get_all_values_with_retry(ws_direct)
+    groups = {}
+    for row in list_of_lists[1:]:
+        if len(row) < 14:
+            continue
+        key = (
+            row[2].strip(),  # Марка ТС
+            row[3].strip(),  # Радиус
+            row[4].strip(),  # Размер
+            row[5].strip(),  # Марка резины
+            row[6].strip(),  # Модель резины
+            row[7].strip(),  # Сезонность
+            row[8].strip()   # Тип диска
+        )
+        groups.setdefault(key, []).append(row)
+    global_xab_cache = groups
+
+def get_xab_koles(company, type, user_id):
+    # Если пользователь ещё не захватил кэш, захватываем его и помечаем
+    global users_with_cache
+    if user_id not in users_with_cache:
+        acquire_cache()
+    result = []
+    # Фильтрация кэша по компании и типу (как у вас ранее)
+    for key, rows in global_xab_cache.items():
+        filtered_rows = [r for r in rows if r[1].strip() == company]
+        if not filtered_rows:
+            continue
+        if type in ["Правое", "Левое"]:
+            filtered = [r for r in filtered_rows if r[9].strip() == type]
+            if filtered:
+                entry = "|".join(key)
+                result.append(entry)
+        elif type == "Ось":
+            wheels = [r[9].strip() for r in filtered_rows]
+            if "Левое" in wheels and "Правое" in wheels:
+                entry = "|".join(key)
+                result.append(entry)
+        elif type == "Комплект":
+            wheels = [r[9].strip() for r in filtered_rows]
+            if wheels.count("Левое") >= 2 and wheels.count("Правое") >= 2:
+                entry = "|".join(key)
+                result.append(entry)
+    result.sort()
+    return result
+
+
+def remove_from_xab_cache(key, removal_dict):
+    """
+    Из кэша удаляются строки для группы с заданным ключом.
+    removal_dict – словарь, в котором для каждого из вариантов ("Левое", "Правое")
+    указывается, сколько строк нужно удалить.
+
+    Например:
+      - Для type "Левое" или "Правое": removal_dict = {"Левое": 1} или {"Правое": 1}
+      - Для type "Ось": removal_dict = {"Левое": 1, "Правое": 1}
+      - Для type "Комплект": removal_dict = {"Левое": 2, "Правое": 2}
+    """
+    global global_xab_cache
+    if key not in global_xab_cache:
+        return
+    rows = global_xab_cache[key]
+    # Для каждого требуемого типа удаляем указанное количество строк
+    for wheel_type, count in removal_dict.items():
+        removed = 0
+        new_rows = []
+        for r in rows:
+            if r[9].strip() == wheel_type and removed < count:
+                removed += 1
+                # строка удаляется из выборки
+                continue
+            new_rows.append(r)
+        rows = new_rows
+    # Если после удаления остаются строки – обновляем группу, иначе удаляем ключ
+    if rows:
+        global_xab_cache[key] = rows
+    else:
+        del global_xab_cache[key]
+
+def acquire_cache(user_id=None):
+    global global_cache_usage, global_xab_cache, users_with_cache
+    if global_xab_cache is None:
+        load_xab_cache()
+    global_cache_usage += 1
+    if user_id is not None:
+        users_with_cache[user_id] = time.time()
+    return global_xab_cache
+
+def cleanup_stale_cache_users(timeout_seconds=1800):
+    global users_with_cache
+    now = time.time()
+    to_release = [user_id for user_id, timestamp in users_with_cache.items() if now - timestamp > timeout_seconds]
+    for user_id in to_release:
+        release_cache(user_id)
+
+def release_cache(chat_id):
+    global global_cache_usage, global_xab_cache
+    if global_cache_usage > 0:
+        global_cache_usage -= 1
+        users_with_cache.pop(chat_id, None)
+    cleanup_cache_if_unused()
+
+def cleanup_cache_if_unused():
+    global global_xab_cache, global_cache_usage, users_with_cache
+    if global_cache_usage <= 0 and not users_with_cache:
+        global_xab_cache = None
+
+@bot.message_handler(commands=['reset_cache'])
+def reset_cache(message):
+    global global_xab_cache, global_cache_usage, users_with_cache
+    # Полный сброс кэша
+    global_xab_cache = None
+    # Обнуляем счётчик активных захватов
+    global_cache_usage = 0
+    # Убираем всех пользователей, которые «захватили» кэш
+    users_with_cache.clear()
+    bot.send_message(
+        message.chat.id,
+        "✅ Кэш и все связанные с ним данные были успешно сброшены.",
+        reply_markup=telebot.types.ReplyKeyboardRemove()
+    )
+def update_xab_koles(company, record, username, grz_tech):
+    """
+    Оптимизированная версия:
+      - 1x get_all_values() для "Онлайн остатки Хаба" и 1x для "Выгрузка сборка"
+      - 1x values_batch_update() для всех обновлений "Выгрузка сборка"
+      - 1x batch_update(deleteDimension[]) для пакетного удаления строк из "Онлайн остатки Хаба"
+    Возвращает 1 при успехе, 0 при ошибке.
+    """
+    try:
+        gc: Client = gspread.service_account("app/creds.json")
+        sh: Spreadsheet = gc.open_by_url(gspread_url_peremeshenie)
+
+        ws_direct = sh.worksheet("Онлайн остатки Хаба")
+        ws_upload = sh.worksheet("Выгрузка сборка")
+
+        # ---- Чтения (2 запроса) ----
+        direct_data = ws_direct.get_all_values()  # A:.. (заголовок + данные)
+        upload_data = ws_upload.get_all_values()
+
+        # Сколько нужно удалить по сторонам
+        need_left = int(record[Rc.COUNT_LEFT])
+        need_right = int(record[Rc.COUNT_RIGHT])
+
+        # Подготовим быстрый индекс по "Выгрузка сборка":
+        # ключ = tuple первых 14 ячеек (с trim), значение = список индексов строк (1-based)
+        upload_index = {}
+        for row_idx, row in enumerate(upload_data, start=1):
+            if len(row) < 14:
+                continue
+            key = tuple(str(v).strip() for v in row[:14])
+            upload_index.setdefault(key, []).append(row_idx)
+
+        # Ключ для сопоставления группы (как в вашей логике):
+        # (Марка ТС, Радиус, Размер, Марка резины, Модель резины, Сезонность, Тип диска)
+        key_tuple = (
+            str(record[Rc.MARKA_TS]).strip(),
+            str(record[Rc.RADIUS]).strip(),
+            str(record[Rc.RAZMER]).strip(),
+            str(record[Rc.MARKA_REZ]).strip(),
+            str(record[Rc.MODEL_REZ]).strip(),
+            str(record[Rc.SEZON]).strip(),
+            str(record[Rc.TIP_DISKA]).strip(),
+        )
+
+        # Список кандидатов на удаление из "Онлайн остатки Хаба" (row_index 1-based с учётом заголовков)
+        deletion_row_indexes = []  # только индексы строк для deleteDimension
+        # Буфер обновлений в "Выгрузка сборка"
+        updates = []  # (row_index, [date, username, grz_tech])
+
+        # Текущая дата для записи в upload-лист (как раньше)
+        current_date = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y")
+
+        # Пробегаем по данным "Онлайн остатки Хаба"; начинаем со 2-й строки (row_index=2), т.к. 1-я — заголовок
+        for row_index, row in enumerate(direct_data[1:], start=2):
+            if len(row) < 14:
+                continue
+
+            # Сопоставление по компании и ключу (позиции в листе: компания=1, далее 2..8 — ключ)
+            if (
+                str(row[1]).strip() == str(company).strip()
+                and (str(row[2]).strip(), str(row[3]).strip(), str(row[4]).strip(),
+                     str(row[5]).strip(), str(row[6]).strip(), str(row[7]).strip(),
+                     str(row[8]).strip()) == key_tuple
+            ):
+                pos = str(row[9]).strip()  # "Левое" / "Правое"
+
+                # Отбираем нужное количество строк под удаление
+                if pos == "Левое" and need_left > 0:
+                    deletion_row_indexes.append(row_index)
+                    need_left -= 1
+                elif pos == "Правое" and need_right > 0:
+                    deletion_row_indexes.append(row_index)
+                    need_right -= 1
+
+        # Если нечего удалять — выходим без ошибок (просто не нашли нужные позиции)
+        if not deletion_row_indexes:
+            logger.debug("update_xab_koles: nothing to delete for %s key=%s", company, key_tuple)
+            return 1
+
+        # Готовим пакет обновлений для "Выгрузка сборка"
+        # Для сопоставления берём первые 14 ячеек строки из direct_data и ищем идентичную 14-ячейковую подпись в upload_index
+        for row_index in deletion_row_indexes:
+            row = direct_data[row_index - 1]  # direct_data индекс 0-based
+            candidate_key = tuple(str(v).strip() for v in row[:14])
+            rows_in_upload = upload_index.get(candidate_key, [])
+            if rows_in_upload:
+                # Обычно ожидается единственное совпадение; но если есть несколько — обновим все
+                for up_idx in rows_in_upload:
+                    updates.append(
+                        (up_idx, [current_date, str(username), str(grz_tech)])
+                    )
+
+        # ---- Выполняем VALUES batch update (1 запрос) ----
+        if updates:
+            data_payload = []
+            for up_idx, values in updates:
+                rng = f"'Выгрузка сборка'!O{up_idx}:Q{up_idx}"
+                data_payload.append({"range": rng, "values": [values]})
+                # retry/backoff
+            gs_values_batch_update_with_retry(sh, data_payload)
+
+        # ---- Пакетное удаление строк из "Онлайн остатки Хаба" (1 запрос) ----
+        # Удаляем в убывающем порядке индексов
+        deletion_row_indexes.sort(reverse=True)
+        requests = []
+        sheet_id = ws_direct.id  # gspread Worksheet.id — это sheetId
+
+        for row_idx in deletion_row_indexes:
+            # startIndex и endIndex 0-based, endIndex не включительно
+            requests.append({
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": row_idx - 1,
+                        "endIndex": row_idx
+                    }
+                }
+            })
+
+        if requests:
+            gs_batch_update_with_retry(sh, requests)
+
+        return 1
+
+    except Exception as e:
+        logger.exception("Ошибка в update_xab_koles (bulk): %s", e)
+        return 0
+
+def update_xab_koles_bulk(company: str, records: list, username: str, grz_tech: str) -> int:
+    """
+    Пакетная версия:
+      - 1x get_all_values() для "Онлайн остатки Хаба" и 1x для "Выгрузка сборка"
+      - 1x values_batch_update() на все попавшие строки "Выгрузка сборка"
+      - 1x batch_update(deleteDimension[]) для пакетного удаления многих строк из "Онлайн остатки Хаба"
+    records — список позиционных записей вида record[idx], где каждая — ваш tlist с Rc.* полями.
+    """
+    try:
+        gc: Client = gspread.service_account("app/creds.json")
+        sh: Spreadsheet = gc.open_by_url(gspread_url_peremeshenie)
+
+        ws_direct = sh.worksheet("Онлайн остатки Хаба")
+        ws_upload = sh.worksheet("Выгрузка сборка")
+
+        # ---- единичные чтения (2 запроса) ----
+        direct_data = ws_direct.get_all_values()
+        upload_data = ws_upload.get_all_values()
+
+        # Индекс по "Выгрузка сборка": ключ = первые 14 колонок, значение = список строк (1-based)
+        # Важно: строки могут дублироваться (2 левых / 2 правых), поэтому храним список индексов.
+        upload_index: dict[tuple, list[int]] = {}
+        for i, row in enumerate(upload_data[1:], start=2):  # start=2 потому что первая строка - заголовок
+            key = tuple(str(v).strip() for v in (row[:14] if len(row) >= 14 else row + [""] * (14 - len(row))))
+            upload_index.setdefault(key, []).append(i)
+
+        # Соберём "нужно списать" по ключам
+        need_map: dict[tuple, dict[str, int]] = {}
+        requested_total = 0
+
+        for rec in records:
+            key_tuple = (
+                str(rec[Rc.MARKA_TS]).strip(),
+                str(rec[Rc.RADIUS]).strip(),
+                str(rec[Rc.RAZMER]).strip(),
+                str(rec[Rc.MARKA_REZ]).strip(),
+                str(rec[Rc.MODEL_REZ]).strip(),
+                str(rec[Rc.SEZON]).strip(),
+                str(rec[Rc.TIP_DISKA]).strip(),
+            )
+            d = need_map.setdefault(key_tuple, {"Левое": 0, "Правое": 0})
+
+            left_need = int(rec[Rc.COUNT_LEFT]) if str(rec[Rc.COUNT_LEFT]).strip() else 0
+            right_need = int(rec[Rc.COUNT_RIGHT]) if str(rec[Rc.COUNT_RIGHT]).strip() else 0
+
+            d["Левое"] += left_need
+            d["Правое"] += right_need
+            requested_total += left_need + right_need
+
+        # Найдём строки для удаления в "Онлайн остатки Хаба"
+        deletion_row_indexes: list[int] = []  # индексы (1-based) в ws_direct
+        current_date = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y")
+        updates: list[tuple[int, list[str]]] = []  # (row_index_in_upload, [O,Q])
+
+        for row_index, row in enumerate(direct_data[1:], start=2):
+            if len(row) < 14:
+                continue
+            if str(row[1]).strip() != str(company).strip():
+                continue
+
+            key_tuple = (
+                str(row[2]).strip(), str(row[3]).strip(), str(row[4]).strip(),
+                str(row[5]).strip(), str(row[6]).strip(), str(row[7]).strip(),
+                str(row[8]).strip()
+            )
+            need = need_map.get(key_tuple)
+            if not need:
+                continue
+
+            pos = str(row[9]).strip()  # "Левое"/"Правое"
+            if pos not in need:
+                continue
+            if need[pos] <= 0:
+                continue
+
+            # эта строка пойдёт под удаление
+            deletion_row_indexes.append(row_index)
+            need[pos] -= 1
+
+            # подготовим обновление "Выгрузка сборка" под ту же 14-ячейковую подпись
+            # ВАЖНО: обновляем РОВНО одну строку на каждое списанное колесо
+            candidate_key = tuple(str(v).strip() for v in row[:14])
+            rows_in_upload = upload_index.get(candidate_key, [])
+            if not rows_in_upload:
+                logger.warning(
+                    "update_xab_koles_bulk: не найдена строка в 'Выгрузка сборка' для списания. company=%s key=%s user=%s grz=%s",
+                    company, candidate_key, username, grz_tech
+                )
+                return 0
+
+            up_idx = rows_in_upload.pop(0)  # «погашаем» только одну строку
+            updates.append((up_idx, [current_date, str(username), str(grz_tech)]))
+
+        selected_total = len(deletion_row_indexes)
+        updated_total = len(updates)
+
+        # 1) В Хабе должно найтись ровно столько колёс, сколько запросили
+        if requested_total > 0 and selected_total < requested_total:
+            logger.warning(
+                "update_xab_koles_bulk: недостаточно позиций в Хабе для списания. company=%s need=%s got=%s user=%s grz=%s",
+                company, requested_total, selected_total, username, grz_tech
+            )
+            return 0
+
+        # 2) На каждое списанное колесо должна быть подготовлена ровно одна отметка
+        if selected_total > 0 and updated_total != selected_total:
+            logger.warning(
+                "update_xab_koles_bulk: несоответствие количества отметок и списаний. company=%s deleted=%s updated=%s user=%s grz=%s",
+                company, selected_total, updated_total, username, grz_tech
+            )
+            return 0
+
+        # ---- batch values update (1 запрос) ----
+        if updates:
+            data_payload = []
+            for up_idx, values in updates:
+                rng = f"'Выгрузка сборка'!O{up_idx}:Q{up_idx}"
+                data_payload.append({"range": rng, "values": [values]})
+            gs_values_batch_update_with_retry(sh, data_payload)
+
+        # ---- пакетное удаление строк из "Хаба" (1 запрос) ----
+        if deletion_row_indexes:
+            deletion_row_indexes.sort(reverse=True)
+            sheet_id = ws_direct.id
+            reqs = []
+            for row_idx in deletion_row_indexes:
+                reqs.append({
+                    "deleteDimension": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": row_idx - 1,
+                            "endIndex": row_idx
+                        }
+                    }
+                })
+            gs_batch_update_with_retry(sh, reqs)
+
+        return 1
+
+    except Exception as e:
+        logger.exception("Ошибка в update_xab_koles_bulk: %s", e)
+        return 0
+
+def send_or_update_long_message(company, chat_id, text, reply_to_message_id=None):
+    max_length = 4096
+    # Разбиваем текст на части, не превышающие max_length символов
+    parts = []
+    if len(text) <= max_length:
+        parts = [text]
+    else:
+        lines = text.split('\n')
+        current_chunk = ""
+        for line in lines:
+            if len(current_chunk) + len(line) + 1 > max_length:
+                parts.append(current_chunk)
+                current_chunk = line
+            else:
+                current_chunk += ("\n" if current_chunk else "") + line
+        if current_chunk:
+            parts.append(current_chunk)
+
+    global last_message_ids
+    old_ids = last_message_ids.get(company)
+    if not old_ids or old_ids == 0:
+        new_ids = []
+        for part in parts:
+            sent = safe_send_message(chat_id, part, reply_to_message_id=reply_to_message_id)
+            new_ids.append(sent.message_id)
+        last_message_ids[company] = new_ids[0] if len(new_ids) == 1 else new_ids
+        save_message_ids(company, last_message_ids[company])
+        return
+
+    if isinstance(old_ids, int):
+        old_ids = [old_ids]
+
+    new_ids = []
+    if len(parts) == 1 and len(old_ids) > 1:
+        last_id = old_ids[-1]
+        try:
+            safe_edit_message_text(parts[0], chat_id, last_id)
+        except ApiTelegramException as e:
+            if "message is not modified" in str(e):
+                pass
+            else:
+                logger.warning("edit_message_text failed: %s", e)
+                sent = safe_send_message(chat_id, parts[0], reply_to_message_id=reply_to_message_id)
+                last_id = sent.message_id
+
+        new_ids = [last_id]
+        for extra_id in old_ids[:-1]:
+            try:
+                _safe_delete_message(chat_id, extra_id)
+            except Exception as e:
+                logger.exception("Error deleting extra message: %s", e)
+    else:
+        for i, part in enumerate(parts):
+            if i < len(old_ids):
+                try:
+                    safe_edit_message_text(part, chat_id, old_ids[i])
+                    new_ids.append(old_ids[i])
+                except ApiTelegramException as e:
+                    if "message is not modified" in str(e):
+                        new_ids.append(old_ids[i])
+                        continue
+                    logger.exception("Error editing message part %d: %s", i, e)
+                    sent = safe_send_message(chat_id, part, reply_to_message_id=reply_to_message_id)
+                    new_ids.append(sent.message_id)
+                    try:
+                        _safe_delete_message(chat_id, old_ids[i])
+                    except Exception as del_e:
+                        logger.exception("Error deleting old message for part %d: %s", i, del_e)
+            else:
+                sent = safe_send_message(chat_id, part, reply_to_message_id=reply_to_message_id)
+                new_ids.append(sent.message_id)
+
+        if len(old_ids) > len(parts):
+            for msg_id in old_ids[len(parts):]:
+                try:
+                    _safe_delete_message(chat_id, msg_id)
+                except Exception as e:
+                    logger.exception("Error deleting extra message: %s", e)
+
+    last_message_ids[company] = new_ids[0] if len(new_ids) == 1 else new_ids
+    save_message_ids(company, last_message_ids[company])
+
+
+def print_google_data(company: str):
+    sh = gspread_open_by_url_with_retry(gspread_url_peremeshenie)
+    ws_direct = sh.worksheet("Онлайн остатки Хаба")
+    direct_data = worksheet_get_all_values_with_retry(ws_direct)
+
+    if len(direct_data) < 2:
+        print("No data found in the spreadsheet")
+        return
+
+    # Фильтрация строк по компании (колонка 1: Company)
+    filtered_rows = [row for row in direct_data[1:] if len(row) >= 10 and row[1].strip() == company]
+
+    # Группируем строки по ключу:
+    # Ключ: (Радиус, Размер, Марка резины, Модель резины, Сезонность, Тип диска)
+    groups = {}  # { brand: { subgroup_key: {"Левое": count, "Правое": count} } }
+    for row in filtered_rows:
+        brand = row[2].strip()
+        subgroup_key = (
+            row[3].strip(),
+            row[4].strip(),
+            row[5].strip(),
+            row[6].strip(),
+            row[7].strip(),
+            row[8].strip()
+        )
+        wheel_pos = row[9].strip()  # Ожидается "Левое" или "Правое"
+
+        if brand not in groups:
+            groups[brand] = {}
+        if subgroup_key not in groups[brand]:
+            groups[brand][subgroup_key] = {"Левое": 0, "Правое": 0}
+        if wheel_pos in groups[brand][subgroup_key]:
+            groups[brand][subgroup_key][wheel_pos] += 1
+
+    # Формируем итоговое сообщение
+    output_lines = []
+    for brand in sorted(groups.keys()):
+        output_lines.append(f"🚗  {brand}")
+        for subgroup in sorted(groups[brand].keys()):
+            radius, size, tire_brand, tire_model, season, disk_type = subgroup
+            counts = groups[brand][subgroup]
+            left_count = counts.get("Левое", 0)
+            right_count = counts.get("Правое", 0)
+
+            details = []
+            kit_count = 0
+            while left_count >= 2 and right_count >= 2:
+                kit_count += 1
+                left_count -= 2
+                right_count -= 2
+            if kit_count > 0:
+                details.append("Комплект " + f"{kit_count}" + "шт")
+
+            axle_count = 0
+            while left_count >= 1 and right_count >= 1:
+                axle_count += 1
+                left_count -= 1
+                right_count -= 1
+            if axle_count > 0:
+                details.append("Ось " + f"{axle_count}" + "шт")
+
+            if left_count > 0:
+                details.append("Левое " + f"{left_count}" + "шт")
+            if right_count > 0:
+                details.append("Правое " + f"{right_count}" + "шт")
+
+            line = (f"🛞 {radius}/{size} | {tire_brand} {tire_model} | {season} | {disk_type} | " +
+                    " | ".join(details) + " |")
+            output_lines.append(line)
+
+    current_time = (datetime.now() + timedelta(hours=3)).strftime("%H:%M %d.%m.%Y")
+    message_text = current_time + "\n\n" + "\n\n".join(output_lines)
+
+    if company == "Яндекс":
+        chat_id = chat_id_Yandex
+        thread_id = thread_id_Yandex_hab
+    elif company == "СитиДрайв":
+        chat_id = chat_id_Sity
+        thread_id = thread_id_Sity_hab
+    else:
+        chat_id = chat_id_Belka
+        thread_id = thread_id_Belka_hab
+
+    # Отправляем или обновляем сообщение(я)
+    send_or_update_long_message(company, chat_id, message_text, reply_to_message_id=thread_id)
+
+@bot.message_handler(commands=['open_gate'])
+def open_gate_start(message):
+    # Только ЛС
+    if int(message.chat.id) < 0:
+        bot.reply_to(message, "Эта команда доступна только в личных сообщениях с ботом")
+        return
+
+    user = message.from_user
+    logger.info("[open_gate] start: @%s (%s)", user.username, user.id)
+
+    # Чистим старую запись пользователя
+    global open_gate_records
+    open_gate_records = [r for r in open_gate_records if r[Og.USER_ID] != user.id]
+
+    try:
+        # 1) ФИО
+        resp = requests.get(
+            urlSmallDtp,
+            params={"tg_chat_id": str(user.id)},
+            timeout=5,
+            verify=False
+        )
+
+        rep = resp.json()
+        fio = (rep.get("user") or {}).get("fullname") or "—"
+
+        # 2) Задачи
+        resp = requests.get(
+            URL_GET_INFO_TASK,
+            params={"tg_chat_id": str(user.id)},
+            timeout=5,
+            verify=False
+        )
+        rep = resp.json()
+
+        if isinstance(rep, list):
+            tasks = rep
+        elif isinstance(rep, dict):
+            tasks = rep.get("active_tasks") or rep.get("tasks") or []
+        else:
+            tasks = []
 
     except Exception as e:
         logger.exception("Ошибка при запросе задач для open_gate: %s", e)
-        await message.answer("Не удалось получить информацию по задачам. Попробуйте позже")
+        bot.send_message(message.chat.id, "Не удалось получить информацию по задачам. Попробуйте позже")
         return
 
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Подтвердить открытие"))
-    kb.add(KeyboardButton("Выход"))
+    # Если задач нет
+    if not tasks:
+        if message.chat.id in list_users:
+            # тестовый режим
+            task = {
+                "task_type": "Перегон СШМ",
+                "carsharing__name": "Тестовая компания",
+                "car_plate": "Т000ТТ000",
+                "car_model": "TestCar",
+            }
+            tasks = [task]
+        else:
+            bot.send_message(message.chat.id, "У вас нет активной задачи")
+            return
+
+    task = tasks[0]
+    car_plate = task.get("car_plate") or "—"
+    company = task.get("carsharing__name") or "—"
+    # car_model = task.get("car_model") or "—"  # пока не используем
+    # task_type = task.get("task_type") or "—"
+
+    # Сохраняем данные в глобальный список
+    open_gate_records.append([
+        user.id,
+        user.username,
+        fio,
+        car_plate,
+        company,
+    ])
+
+    kb = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    kb.row(telebot.types.KeyboardButton("Подтвердить открытие"))
+    kb.row(telebot.types.KeyboardButton("Выход"))
 
     text = (
         f"ФИО: {fio}\n"
+        f"ГРЗ: {car_plate}\n"
+        f"Компания: {company}\n\n"
         "Подтвердите открытие ворот склада"
     )
 
-    sent = await message.answer(text, reply_markup=kb)
-    await state.update_data(prompt_msg_id=sent.message_id)
-    await OpenGateStates.WAIT_CONFIRM.set()
+    bot.send_message(message.chat.id, text, reply_markup=kb)
+    bot.register_next_step_handler(message, open_gate_confirm)
 
-@dp.message_handler(state=OpenGateStates.WAIT_CONFIRM)
-async def open_gate_confirm(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    prompt_msg_id = data.get("prompt_msg_id")
+def open_gate_confirm(message):
+    global open_gate_records
 
-    if prompt_msg_id:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=prompt_msg_id)
-        except Exception as e:
-            logger.exception("Не удалось удалить сообщение с подтверждением: %s", e)
+    user = message.from_user
+    text = (message.text or "").strip().lower()
 
+    # Ищем запись пользователя
+    record = None
+    for r in open_gate_records:
+        if r[Og.USER_ID] == user.id:
+            record = r
+            break
 
-    text = message.text.strip()
-
-    if text.lower() == "выход":
-        await message.answer("Операция отменена", reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+    if record is None:
+        # Нет активной операции — просто уберём клавиатуру и выйдем
+        bot.send_message(message.chat.id, "Операция не найдена", reply_markup=telebot.types.ReplyKeyboardRemove())
         return
 
-    if text.lower() == "подтвердить открытие":
-        data = await state.get_data()
+    if text == "выход":
+        bot.send_message(message.chat.id, "Операция отменена", reply_markup=telebot.types.ReplyKeyboardRemove())
+        open_gate_records = [r for r in open_gate_records if r[Og.USER_ID] != user.id]
+        return
 
-        fio = data.get("fio", "—")
-        plate = data.get("car_plate", "")
-        company = data.get("company", "")
+    if text == "подтвердить открытие":
+        fio = record[Og.FIO]
+        plate = record[Og.CAR_PLATE]
+        company = record[Og.COMPANY]
 
+        # логисты
         _teg, _fi = find_logistics_rows()
         if not _fi:
             logist = ""
         else:
             logist = " , ".join(f"{name} ({teg})" for name, teg in zip(_fi, _teg))
 
-        now_msk = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
         send_text = (
             f"#Открытие_Склада\n\n"
-            f"{now_msk}\n"
             f"ФИО: {fio}\n"
+            f"ГРЗ: {plate}\n"
+            f"Компания: {company}\n"
             f"Откройте, пожалуйста, ворота\n{logist}"
         )
 
-        CHAT_ID = chat_id_sborka_Sity
-        THREAD_ID = thread_id_gates_Sity
+        if company == "Яндекс":
+            CHAT_ID = chat_id_Yandex
+            THREAD_ID = thread_id_Yandex_gates
+        else:
+            CHAT_ID = chat_id_Sity
+            THREAD_ID = thread_id_Sity_gates
+
         try:
-            sent = await bot.send_message(
+            sent = bot.send_message(
                 chat_id=CHAT_ID,
                 text=send_text,
                 message_thread_id=THREAD_ID
             )
-
         except Exception as e:
             logger.exception("Ошибка отправки в складской чат: %s", e)
-            await message.answer("Ошибка отправки в складской чат", reply_markup=ReplyKeyboardRemove())
-            await state.finish()
+            bot.send_message(
+                message.chat.id,
+                "Ошибка отправки в складской чат",
+                reply_markup=telebot.types.ReplyKeyboardRemove()
+            )
+            open_gate_records = [r for r in open_gate_records if r[Og.USER_ID] != user.id]
             return
 
+        # ссылка на сообщение в чате склада
         message_link = f"https://t.me/c/{str(CHAT_ID)[4:]}/{THREAD_ID}/{sent.message_id}"
 
         try:
@@ -3486,420 +3305,305 @@ async def open_gate_confirm(message: types.Message, state: FSMContext):
                 fio=fio,
                 car_plate=plate,
                 company=company,
-                message_link=message_link)
+                message_link=message_link
+            )
         except Exception as e:
-            logger.exception("Ошибка отправки в write_open_gate_row: %s", e)
+            logger.exception("Ошибка в write_open_gate_row: %s", e)
 
-        await message.answer(f"Сообщение отправлено логисту {logist}", reply_markup=ReplyKeyboardRemove())
-        await state.finish()
+        bot.send_message(
+            message.chat.id,
+            f"Сообщение отправлено логисту {logist}",
+            reply_markup=telebot.types.ReplyKeyboardRemove()
+        )
+
+        open_gate_records = [r for r in open_gate_records if r[Og.USER_ID] != user.id]
         return
 
-    await message.answer("Выберите действие: Подтвердить открытие / Выход")
-
-# -----------------------------------------------------------------------------------------------------
-# Keyboar
-# -----------------------------------------------------------------------------------------------------
-def getKeyboardList(record_list):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for record in record_list:
-        keyboard.row(types.KeyboardButton(text=str(record)))
-    keyboard.row(types.KeyboardButton(text="Назад"), types.KeyboardButton(text="Выход"))
-    return keyboard
+    # Любой другой текст — повторяем шаг подтверждения
+    bot.send_message(message.chat.id, "Выберите действие: Подтвердить открытие / Выход")
+    bot.register_next_step_handler(message, open_gate_confirm)
 
 
-def getKeyboardStep1(record_list):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for record in record_list:
-        keyboard.row(types.KeyboardButton(text=str(record)))
-    keyboard.row(types.KeyboardButton(text="Выход"))
-    return keyboard
+def get_list_marka_ts(record, Cl):
+    if record[Cl.COMPANY] == "СитиДрайв":
+        global marka_ts_st
+        return marka_ts_st
+    elif record[Cl.COMPANY] == "Яндекс":
+        global marka_ts_ya
+        return marka_ts_ya
+    else:
+        global marka_ts_blk
+        return marka_ts_blk
 
-
-# -----------------------------------------------------------------------------------------------------
-# Functions
-# -----------------------------------------------------------------------------------------------------
-def get_list_radius(company):
-    if company == "СитиДрайв":
+def get_list_radius(record, Cl):
+    if record[Cl.COMPANY] == "СитиДрайв":
         lst = list_rez_st
-    elif company == "Яндекс":
+    elif record[Cl.COMPANY] == "Яндекс":
         lst = list_rez_ya
     else:
         lst = list_rez_blk
     return get_list_radius_bz_znan(lst)
 
 
-
 def get_list_radius_bz_znan(bz_znan):
     tlist = list()
     for i, rez in enumerate(bz_znan):
-        tlist.append(int(rez[GHRezina.RADIUS]))
+        tlist.append(int(rez[1]))
     return tlist
 
-
-def get_list_razmer(company,radius):
-    if company == "СитиДрайв":
+def get_list_razmer(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
         lst = list_rez_st
-    elif company == "Яндекс":
+    elif record[Cl.COMPANY] == "Яндекс":
         lst = list_rez_ya
     else:
         lst = list_rez_blk
-    return get_list_razmer_bz_znan(lst,radius)
+    return get_list_razmer_bz_znan(lst, cur_record)
 
 
-def get_list_razmer_bz_znan(bz_znan,radius):
+def get_list_razmer_bz_znan(bz_znan, record):
     tlist = list()
     for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip():
-            tlist.append(str(rez[GHRezina.RAZMER]).strip())
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip():
+            tlist.append(str(rez[2]).strip())
     return tlist
 
 
-def get_list_marka(company, radius, razmer):
-    if company == "СитиДрайв":
+def get_list_marka(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
         lst = list_rez_st
-    elif company == "Яндекс":
+    elif record[Cl.COMPANY] == "Яндекс":
         lst = list_rez_ya
     else:
         lst = list_rez_blk
-    return get_list_marka_bz_znan(lst, radius, razmer)
+    return get_list_marka_bz_znan(lst, cur_record)
 
 
-def get_list_marka_bz_znan(bz_znan, radius, razmer):
+def get_list_marka_bz_znan(bz_znan, record):
     tlist = list()
     for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip() and \
-                str(razmer) == str(rez[GHRezina.RAZMER]).strip():
-            tlist.append(str(rez[GHRezina.MARKA]).strip())
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip():
+            tlist.append(str(rez[4]).strip())
     return tlist
 
 
-def get_list_model(company, radius, razmer, marka_rez):
-    if company == "СитиДрайв":
+def get_list_model(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
         lst = list_rez_st
-    elif company == "Яндекс":
+    elif record[Cl.COMPANY] == "Яндекс":
         lst = list_rez_ya
     else:
         lst = list_rez_blk
-    return get_list_model_bz_znan(lst, radius, razmer, marka_rez)
+    return get_list_model_bz_znan(lst, cur_record)
 
-
-
-def get_list_model_bz_znan(bz_znan, radius, razmer, marka_rez):
+def get_list_model_bz_znan(bz_znan, record):
     tlist = list()
     for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                rez[GHRezina.RAZMER]).strip() and str(marka_rez) == str(rez[GHRezina.MARKA]).strip():
-            tlist.append(str(rez[GHRezina.MODEL]).strip())
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip() and str(record[Rc.MARKA_REZ]) == str(rez[4]).strip():
+            tlist.append(str(rez[5]).strip())
     return tlist
 
 
-def get_list_sezon(company, radius, razmer, marka_rez, model_rez, short = 0):
-    if company == "СитиДрайв":
+def get_sezon(record, Cl, cur_record):
+    if record[Cl.COMPANY] == "СитиДрайв":
         lst = list_rez_st
-    elif company == "Яндекс":
+    elif record[Cl.COMPANY] == "Яндекс":
         lst = list_rez_ya
     else:
         lst = list_rez_blk
-    return get_list_sezon_bz_znan(lst, radius, razmer, marka_rez, model_rez, short)
+    return get_sezon_bz_znan(lst, cur_record)
 
 
-
-def get_list_sezon_bz_znan(bz_znan, radius, razmer, marka_rez, model_rez, short):
-    tlist = list()
-    if not short:
-        for i, rez in enumerate(bz_znan):
-            if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                    rez[GHRezina.RAZMER]).strip() and str(marka_rez) == str(rez[GHRezina.MARKA]).strip() and str(model_rez) == str(rez[GHRezina.MODEL]).strip():
-                tlist.append(str(rez[GHRezina.SEZON]).strip())
-    else:
-        for i, rez in enumerate(bz_znan):
-            if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                    rez[GHRezina.RAZMER]).strip():
-                tlist.append(str(rez[GHRezina.SEZON]).strip())
-    return tlist
-
-
-def get_list_marka_ts(company):
-    if company == "СитиДрайв":
-        lst = list_per_st
-        count = 2
-    elif company == "Яндекс":
-        lst = list_per_ya
-        count = 3
-    else:
-        lst = list_per_blk
-        count = 1
-    return get_list_marka_ts_bz_znan(lst, count)
-
-
-def get_list_marka_ts_bz_znan(bz_znan, nomer):
-    tlist = list()
+def get_sezon_bz_znan(bz_znan, record):
     for i, rez in enumerate(bz_znan):
-        tlist.append(str(rez[nomer]))
-    return tlist
+        if str(record[Rc.RADIUS]) == str(rez[1]).strip() and str(record[Rc.RAZMER]) == str(rez[2]).strip() and str(record[Rc.MARKA_REZ]) == str(rez[4]).strip() and str(record[Rc.MODEL_REZ]) == str(rez[5]).strip():
+            return str(rez[3]).strip()
 
-
-def loading_rezina_is_Google_Sheets():
-    global list_rez_st
-    list_rez_st = loading_bz_znaniya("Резина Сити")
-    global list_rez_ya
-    list_rez_ya = loading_bz_znaniya("Резина ЯД")
-    global list_rez_blk
-    list_rez_blk = loading_bz_znaniya("Резина Белка")
-
-
-def loading_model_is_Google_Sheets():
-    global list_per_st
-    list_per_st = loading_bz_znaniya("Перечень ТС Сити")
-    global list_per_ya
-    list_per_ya = loading_bz_znaniya("Перечень ТС Яд")
-    global list_per_blk
-    list_per_blk = loading_bz_znaniya("Перечень ТС Белка")
-
-def get_list_razmer_rez(company):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    tlist = list()
-    for i, rez in enumerate(lst):
-        tlist.append(str(rez[2]))
-    return tlist
-
-def get_list_marka_rez(company):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    tlist = list()
-    for i, rez in enumerate(lst):
-        tlist.append(str(rez[4]))
-    return tlist
-
-def get_list_sezon_rez(company):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    tlist = list()
-    for i, rez in enumerate(lst):
-        tlist.append(str(rez[3]))
-    return tlist
-
-def getGRZTs(company, input_grz):
-    grz = list()
-    if company == "СитиДрайв":
-        lst = list_per_st
-        ind = 0
-    elif company == "Яндекс":
-        lst = list_per_ya
-        ind = 0
-    else:
-        lst = list_per_blk
-        ind = 2
-    grz_ts = list()
-    for i,string in enumerate(lst):
-        grz_ts.append(string[ind])
-    for i,string in enumerate(grz_ts):
-        if string.startswith(input_grz):
-            grz.append(string)
-    return grz
-
-def get_park_TS_YNDX(grz: str):
-    grz = str(grz).strip().lower()
-    for row in list_per_ya:
-        if str(row[0]).strip().lower() == grz:
-            return row[2]
-
-    return None
-
-def check_validation_radius(company, radius):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    return check_radius(lst, radius)
-
-
-def check_radius(bz_znan, radius):
-    for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip():
-            return 1
-    return 0
-
-
-def check_validation_razmer(company, radius, razmer):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    return check_razmer(lst, radius, razmer)
-
-
-def check_razmer(bz_znan, radius, razmer):
-    for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                rez[GHRezina.RAZMER]).strip():
-            return 1
-    return 0
-
-
-def check_validation_marka(company, radius, razmer, marka_rez):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    return check_marka(lst, radius, razmer, marka_rez)
-
-
-def check_marka(bz_znan, radius, razmer, marka_rez):
-    for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                rez[GHRezina.RAZMER]).strip() and str(marka_rez) == str(rez[GHRezina.MARKA]).strip():
-            return 1
-    return 0
-
-
-def check_validation_model(company,  radius, razmer, marka_rez, model_rez):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    return check_model(lst, radius, razmer, marka_rez, model_rez)
-
-
-def check_model(bz_znan, radius, razmer, marka_rez, model_rez):
-    for i, rez in enumerate(bz_znan):
-        if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                rez[GHRezina.RAZMER]).strip() and str(marka_rez) == str(rez[GHRezina.MARKA]).strip() and str(model_rez) == str(rez[GHRezina.MODEL]).strip():
-            return 1
-    return 0
-
-
-def check_validation_sezon(company, radius, razmer, marka_rez, model_rez, sezon, short = 0):
-    if company == "СитиДрайв":
-        lst = list_rez_st
-    elif company == "Яндекс":
-        lst = list_rez_ya
-    else:
-        lst = list_rez_blk
-    return check_sezon(lst, radius, razmer, marka_rez, model_rez, sezon, short)
-
-
-def check_sezon(bz_znan, radius, razmer, marka_rez, model_rez, sezon, short):
-    if not short:
-        for i, rez in enumerate(bz_znan):
-            if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(
-                    rez[GHRezina.RAZMER]).strip() and str(marka_rez) == str(rez[GHRezina.MARKA]).strip() and str(
-                    model_rez) == str(rez[GHRezina.MODEL]).strip() and str(sezon) == str(
-                    rez[GHRezina.SEZON]).strip():
-                return 1
-    else:
-        for i, rez in enumerate(bz_znan):
-            if str(radius) == str(rez[GHRezina.RADIUS]).strip() and str(razmer) == str(rez[GHRezina.RAZMER]).strip() and str(sezon) == str(rez[GHRezina.SEZON]).strip():
-                return 1
-    return 0
-
-
-def check_validation_marka_ts(company, marka_ts):
-    return check_marka_ts(company, marka_ts)
-
-
-def check_marka_ts(company, marka_ts):
-    tlist = sorted(list(set(get_list_marka_ts(company))))
-    for i, rez in enumerate(tlist):
-        if str(marka_ts).strip() == str(rez).strip():
-            return 1
-    return 0
-
-async def debug_fsm_context(message: types.Message, state: FSMContext):
+def _telegram_call_with_retry(func, *args, max_retries: int = 3, base_delay: float = 1.0, **kwargs):
     """
-    Выводит текущее state и все пары ключ:значение из FSMContext
+    Универсальный ретрай для вызовов Telegram API (send_message, edit_message_text и т.п.).
+    Ловим сетевые ConnectionError и пробуем ещё раз.
     """
-    # получаем имя текущего состояния
-    current_state = await state.get_state()
-    # получаем все данные, которые накопились в FSMContext
-    data = await state.get_data()
+    for attempt in range(1, max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except requests.exceptions.ConnectionError as e:
+            # Telegram/сеть оборвали соединение
+            if attempt == max_retries:
+                logger.warning(
+                    "Telegram %s failed after %d attempts: %s",
+                    func.__name__, attempt, e
+                )
+                # После всех попыток — пробрасываем наверх (поймается в worker-е)
+                raise
+            logger.warning(
+                "Telegram %s ConnectionError (attempt %d/%d): %s",
+                func.__name__, attempt, max_retries, e
+            )
+            _sleep_with_jitter(base_delay, attempt)
+        except ApiTelegramException as e:
+            # Здесь можно добавить отдельную логику под 429 и т.п., если захочешь.
+            logger.warning("Telegram %s ApiTelegramException: %s", func.__name__, e)
+            raise
 
-    # формируем текст отчёта
-    report_lines = [f"📒 Текущее состояние: {current_state or 'None'}", "🔑 Данные FSMContext:"]
-    if data:
-        for key, value in data.items():
-            report_lines.append(f" • {key}: {value!r}")
+
+def safe_send_message(chat_id, text, **kwargs):
+    return _telegram_call_with_retry(bot.send_message, chat_id, text, **kwargs)
+
+
+def safe_edit_message_text(text, chat_id, message_id, **kwargs):
+    return _telegram_call_with_retry(bot.edit_message_text, text, chat_id, message_id, **kwargs)
+
+
+def split_entry(entry: str) -> list:
+    return [part.strip() for part in entry.split("|") if part.strip()]
+
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS company_messages (
+                company TEXT PRIMARY KEY CHECK (company IN ('Яндекс', 'СитиДрайв', 'Белка')),
+                message_id TEXT
+            )
+        """)
+        # Вставляем записи для компаний по умолчанию, если их еще нет
+        cursor.execute("INSERT OR IGNORE INTO company_messages (company, message_id) VALUES ('Яндекс', NULL)")
+        cursor.execute("INSERT OR IGNORE INTO company_messages (company, message_id) VALUES ('СитиДрайв', NULL)")
+        cursor.execute("INSERT OR IGNORE INTO company_messages (company, message_id) VALUES ('Белка', NULL)")
+        conn.commit()
+
+def save_message_ids(company, message_ids):
+    """
+    Сохраняем message_ids как JSON-строку.
+    Если message_ids – список, сохраняется список, иначе сохраняется список из одного элемента.
+    """
+    if isinstance(message_ids, list):
+        value = json.dumps(message_ids)
     else:
-        report_lines.append(" (пусто)")
+        value = json.dumps([message_ids])
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO company_messages (company, message_id)
+            VALUES (?, ?)
+            ON CONFLICT(company) DO UPDATE SET message_id = excluded.message_id
+        """, (company, value))
+        conn.commit()
 
-    report = "\n".join(report_lines)
+def load_message_ids():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT company, message_id FROM company_messages")
+        data = cursor.fetchall()
+    result = {}
+    for company, msg_ids in data:
+        if msg_ids:
+            try:
+                parsed = json.loads(msg_ids)
+                # Если список состоит из одного элемента – сохраняем как int, иначе как список
+                result[company] = parsed[0] if len(parsed) == 1 else parsed
+            except Exception as e:
+                result[company] = 0
+        else:
+            result[company] = 0
+    return result
 
-    # вывод в консоль
-    print(report)
+def schedule_print_google_data():
+    def worker():
+        while True:
+            try:
+                cleanup_stale_cache_users()
+                print_google_data("Яндекс")
+                print_google_data("СитиДрайв")
+                print_google_data("Белка")
+            except requests.exceptions.ConnectionError as e:
+                logger.warning("Сетевой сбой при вызове print_google_data (будет повтор через 5 минут): %s", e)
+            except Exception as e:
+                logger.exception("Неожиданная ошибка при вызове print_google_data: %s", e)
+            time.sleep(300)  # 5 минут
+
+    threading.Thread(target=worker, daemon=True).start()
+
+def migrate_company_messages_add_belka():
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        # Проверим, можно ли вставить 'Белка' — если нельзя, значит старый CHECK
+        try:
+            cur.execute("""
+                INSERT INTO company_messages (company, message_id) VALUES ('Белка', NULL)
+                ON CONFLICT(company) DO NOTHING
+            """)
+            conn.commit()
+            return  # всё ок, миграция не нужна
+        except sqlite3.IntegrityError:
+            pass  # нужен пересоздание таблицы
+
+        logger.info("Migrating company_messages to include 'Белка' in CHECK...")
+        cur.execute("PRAGMA foreign_keys=OFF;")
+
+        # Переименуем старую таблицу
+        cur.execute("ALTER TABLE company_messages RENAME TO company_messages_old;")
+
+        # Создадим новую с корректным CHECK
+        cur.execute("""
+            CREATE TABLE company_messages (
+                company TEXT PRIMARY KEY CHECK (company IN ('Яндекс', 'СитиДрайв', 'Белка')),
+                message_id TEXT
+            )
+        """)
+
+        # Перенесём существующие записи, с маппингом: если вдруг есть мусорные компании — пропустим
+        cur.execute("""
+            INSERT OR IGNORE INTO company_messages (company, message_id)
+            SELECT company, message_id
+            FROM company_messages_old
+            WHERE company IN ('Яндекс', 'СитиДрайв', 'Белка')
+        """)
+
+        # Добьёмся наличия всех трёх компаний
+        for comp in ('Яндекс', 'СитиДрайв', 'Белка'):
+            cur.execute("""
+                INSERT OR IGNORE INTO company_messages (company, message_id)
+                VALUES (?, NULL)
+            """, (comp,))
+
+        cur.execute("DROP TABLE company_messages_old;")
+        conn.commit()
+        cur.execute("PRAGMA foreign_keys=ON;")
+        logger.info("Migration completed.")
 
 # -----------------------------------------------------------------------------------------------------
-def _check_exit(message: types.Message) -> bool:
-    """
-    Проверяем, не нажал ли пользователь кнопку "Выход".
-    Если да — пишем сообщение и возвращаем True, чтобы прервать обработку.
-    """
-    if message.text and message.text.lower() == "выход":
-        # Удаляем клавиатуру
-        kb_remove = types.ReplyKeyboardRemove()
-        asyncio.create_task(
-            message.answer("Оформление завершено", reply_markup=kb_remove)
-        )
-        return True
-    return False
-# -----------------------------------------------------------------------------------------------------
-async def main():
+def main():
     # Запуск логирования
-    Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
-    log_name = f'{LOGS_DIR}/{datetime.now().strftime("%Y-%m-%d")}.log'
-    file_handler = logging.FileHandler(log_name, mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    fmt = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-    file_handler.setFormatter(fmt)
+    log_name = f'logs/{datetime.now().strftime("%Y-%m-%d")}.log'
+    Path(log_name).parent.mkdir(parents=True, exist_ok=True)
 
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
+    logging.basicConfig(
+        level=logging.WARNING,
+        filename=log_name,
+        format='%(asctime)s (%(levelname)s): %(message)s (Line: %(lineno)d) [%(filename)s]',
+        filemode="a"
+    )
 
-    # Начальная загрузка базы данных
-    try:
-        with_sheets_retry(
-            loading_rezina_is_Google_Sheets,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось загурзить из Гугл Таблицы данные после 3 попыток")
+    init_db()
+    # migrate_company_messages_add_belka()
+    # Загружаем сохраненные id сообщений из базы
+    db_message_ids = load_message_ids()
+    for company in last_message_ids:
+        if company in db_message_ids and db_message_ids[company] is not None:
+            last_message_ids[company] = db_message_ids[company]
 
-    try:
-        with_sheets_retry(
-            loading_model_is_Google_Sheets,
-            max_attempts=3,
-            base_delay=2
-        )
-    except RuntimeError:
-        logger.error("Не удалось загурзить из Гугл Таблицы данные после 3 попыток")
+    loading_grz_is_Google_Sheets()
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(periodic_print_zayavka())
+    print_google_data("Яндекс")
+    print_google_data("СитиДрайв")
+    print_google_data("Белка")
 
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling()
+    schedule_print_google_data()
+
+    # Запуск бота
+    bot.polling(none_stop=True)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
