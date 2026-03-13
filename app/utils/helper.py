@@ -62,8 +62,6 @@ async def post_registration_async(
     max_user_id: int,
     max_chat_id: int,
 ) -> Optional[str]:
-    if not URL_REGISTRASHION:
-        return "URL_REGISTRASHION is not set"
 
     json_data = {
         "phone": str(phone),
