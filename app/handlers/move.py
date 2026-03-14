@@ -9,9 +9,9 @@ import asyncio
 from typing import Dict, List, Set
 
 from app.config import (
-    DAMAGE_CHAT_ID_BELKA,
-    DAMAGE_CHAT_ID_CITY,
-    DAMAGE_CHAT_ID_YANDEX,
+    MOVE_MAX_CHAT_ID_CITY,
+    MOVE_MAX_CHAT_ID_YANDEX,
+    MOVE_MAX_CHAT_ID_BELKA,
     TELEGRAM_CHAT_ID_SBORKA_BELKA,
     TELEGRAM_CHAT_ID_SBORKA_CITY,
     TELEGRAM_CHAT_ID_SBORKA_YANDEX,
@@ -20,7 +20,19 @@ from app.config import (
     TELEGRAM_THREAD_ID_MOVE_YANDEX,
     TELEGRAM_BOT_TOKEN_TECHNIK,
 )
-from app.utils.gsheets import load_tech_plates, write_in_answers_ras
+from app.utils.gsheets import (
+    load_tech_plates,
+    write_in_answers_ras,
+    load_xab_cache,
+    get_xab_koles,
+    update_xab_koles_bulk,
+    get_move_marka_ts_options,
+    get_move_radius_options,
+    get_move_razmer_options,
+    get_move_marka_options,
+    get_move_model_options,
+    get_move_sezon_options,
+)
 from app.utils.helper import get_fio_async
 from app.utils.telegram_api import send_report as send_telegram_report
 from app.utils.max_api import (
@@ -31,17 +43,17 @@ from app.utils.max_api import (
     send_text_with_reply_buttons,
 )
 
-try:
-    from app.utils.gsheets import load_xab_cache, get_xab_koles
-except Exception:
-    load_xab_cache = None
-    get_xab_koles = None
-
-
 _KEY_ACTION = ["Забираете со склада", "Сдаете бой", "Передаете в техничку"]
 _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
 _KEY_SEASON = ["Лето", "Зима", "Шип", "Липучка", "Всесезон"]
 _KEY_WHEEL_TYPE = ["Комплект", "Ось", "Правое", "Левое"]
+key_type_disk = ["Литой оригинальный", "Литой неоригинальный", "Штамп"]
+
+_PAGINATION_PAGE_SIZE = 20
+_PAGINATION_PREV_TEXT = "<<"
+_PAGINATION_PREV_PAYLOAD = "move_prev_page"
+_PAGINATION_MORE_TEXT = ">>"
+_PAGINATION_MORE_PAYLOAD = "move_more"
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +61,6 @@ _MOVE_CACHE_TTL_SECONDS = 1800
 _move_tech_plates_cache: list[str] | None = None
 _move_cache_usage = 0
 _move_users_with_cache: dict[int, float] = {}
-
 
 @dataclass
 class MoveItem:
@@ -64,7 +75,6 @@ class MoveItem:
     count_left: int = 0
     count_right: int = 0
 
-
 @dataclass
 class MoveFlow:
     step: str = ""
@@ -73,29 +83,23 @@ class MoveFlow:
     files: List[dict] = field(default_factory=list)
     file_keys: Set[str] = field(default_factory=set)
 
-
 @dataclass
 class MoveState:
     flows_by_user: Dict[int, MoveFlow] = field(default_factory=dict)
 
-
 def _normalize(text: str) -> str:
     return text.strip().strip("«»\"'").lower()
 
-
 _ACTION_BY_NORMALIZED = {_normalize(action): action for action in _KEY_ACTION}
-
 
 def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
     if include_back:
         return ["Назад", "Выход"], ["move_back", "move_exit"]
     return ["Выход"], ["move_exit"]
 
-
 def _is_plate_format(value: str) -> bool:
     cleaned = re.sub(r"\s+", "", str(value).upper())
     return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
-
 
 def _normalize_wheel_type(value: str) -> str:
     v = _normalize(value)
@@ -109,7 +113,6 @@ def _normalize_wheel_type(value: str) -> str:
         return "Комплект"
     return value.strip()
 
-
 def _tech_plate_is_known(flow: MoveFlow, plate: str) -> bool:
     options = flow.data.get("tech_grz_options") or []
     plate_norm = re.sub(r"\s+", "", str(plate).upper())
@@ -117,7 +120,6 @@ def _tech_plate_is_known(flow: MoveFlow, plate: str) -> bool:
         if re.sub(r"\s+", "", str(item).upper()) == plate_norm:
             return True
     return False
-
 
 def _pickup_counts_by_type(type_name: str) -> tuple[int, int]:
     if type_name == "Левое":
@@ -130,13 +132,77 @@ def _pickup_counts_by_type(type_name: str) -> tuple[int, int]:
         return 2, 2
     return 0, 0
 
-
 def split_entry(text: str) -> list[str]:
     parts = [part.strip() for part in str(text).split("|")]
     while len(parts) < 7:
         parts.append("")
     return parts[:7]
 
+def _paginate_options(options: list[str], page: int, page_size: int = _PAGINATION_PAGE_SIZE) -> tuple[list[str], bool, bool, int]:
+    if page_size <= 0:
+        page_size = _PAGINATION_PAGE_SIZE
+    total = len(options)
+    if total <= 0:
+        return [], False, False, 0
+    max_page = max(0, (total - 1) // page_size)
+    page = max(0, min(page, max_page))
+    start = page * page_size
+    end = min(start + page_size, total)
+    has_prev = page > 0
+    has_more = end < total
+    return options[start:end], has_prev, has_more, page
+
+async def _ask_paginated(
+    flow: MoveFlow,
+    chat_id: int,
+    text: str,
+    options: list[str],
+    state_key: str,
+    include_back: bool = True,
+    page_size: int = _PAGINATION_PAGE_SIZE,
+) -> None:
+    page = int(flow.data.get(f"{state_key}_page", 0) or 0)
+    page_options, has_prev, has_more, page = _paginate_options(options, page, page_size=page_size)
+    flow.data[f"{state_key}_options"] = list(options)
+    flow.data[f"{state_key}_page"] = page
+
+    controls, payloads = _kb_control(include_back=include_back)
+    button_texts = list(page_options)
+    button_payloads = list(page_options)
+    if has_prev:
+        button_texts.append(_PAGINATION_PREV_TEXT)
+        button_payloads.append(_PAGINATION_PREV_PAYLOAD)
+    if has_more:
+        button_texts.append(_PAGINATION_MORE_TEXT)
+        button_payloads.append(_PAGINATION_MORE_PAYLOAD)
+    button_texts.extend(controls)
+    button_payloads.extend(payloads)
+
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=text,
+        button_texts=button_texts,
+        button_payloads=button_payloads,
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+def _pagination_next_page(flow: MoveFlow, state_key: str) -> None:
+    current = int(flow.data.get(f"{state_key}_page", 0) or 0)
+    flow.data[f"{state_key}_page"] = current + 1
+
+def _pagination_prev_page(flow: MoveFlow, state_key: str) -> None:
+    current = int(flow.data.get(f"{state_key}_page", 0) or 0)
+    flow.data[f"{state_key}_page"] = max(0, current - 1)
+
+def _pagination_reset(flow: MoveFlow, state_key: str) -> None:
+    flow.data.pop(f"{state_key}_page", None)
+    flow.data.pop(f"{state_key}_options", None)
 
 async def _ask(flow: MoveFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
     controls, payloads = _kb_control(include_back=include_back)
@@ -155,7 +221,6 @@ async def _ask(flow: MoveFlow, chat_id: int, text: str, options: list[str], incl
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
-
 async def _send_plain(flow: MoveFlow, chat_id: int, text: str) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
@@ -165,7 +230,6 @@ async def _send_plain(flow: MoveFlow, chat_id: int, text: str) -> None:
     msg_id = extract_message_id(response)
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
-
 
 def _control_candidates(text: str, msg: dict) -> set[str]:
     candidates = [text]
@@ -180,7 +244,6 @@ def _control_candidates(text: str, msg: dict) -> set[str]:
                     candidates.append(value)
 
     return {_normalize(v) for v in candidates if isinstance(v, str) and v.strip()}
-
 
 def _control(text: str, msg: dict) -> str:
     norms = _control_candidates(text, msg)
@@ -198,8 +261,11 @@ def _control(text: str, msg: dict) -> str:
         return "fix"
     if "move_delete_done" in norms or "завершить" in norms:
         return "delete_done"
+    if _normalize(_PAGINATION_PREV_TEXT) in norms or _normalize(_PAGINATION_PREV_PAYLOAD) in norms:
+        return "prev_page"
+    if _normalize(_PAGINATION_MORE_TEXT) in norms or _normalize(_PAGINATION_MORE_PAYLOAD) in norms:
+        return "more"
     return ""
-
 
 def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
     attachments = msg.get("attachments")
@@ -222,7 +288,6 @@ def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
             out.append({"type": t, "payload": item.get("payload")})
     return out
 
-
 def _add_files(flow: MoveFlow, attachments: List[dict], max_files: int) -> int:
     added = 0
     for item in attachments:
@@ -236,17 +301,17 @@ def _add_files(flow: MoveFlow, attachments: List[dict], max_files: int) -> int:
         added += 1
     return added
 
-
-def _load_move_tech_plates_cache() -> list[str]:
+def _load_move_tech_plates_cache(force_reload: bool = False) -> list[str]:
     global _move_tech_plates_cache
-    if _move_tech_plates_cache is None:
+    if _move_tech_plates_cache is None or not _move_tech_plates_cache or force_reload:
         _move_tech_plates_cache = load_tech_plates()
     return _move_tech_plates_cache
 
-
-def acquire_move_cache(user_id: int | None = None) -> list[str]:
+def acquire_move_cache(user_id: int | None = None, force_reload: bool = False) -> list[str]:
     global _move_cache_usage
-    options = _load_move_tech_plates_cache()
+    options = _load_move_tech_plates_cache(force_reload=force_reload)
+    if not options:
+        options = _load_move_tech_plates_cache(force_reload=True)
 
     if user_id is None:
         _move_cache_usage += 1
@@ -257,13 +322,11 @@ def acquire_move_cache(user_id: int | None = None) -> list[str]:
     _move_users_with_cache[user_id] = time.time()
     return options
 
-
 def cleanup_stale_move_cache_users(timeout_seconds: int = _MOVE_CACHE_TTL_SECONDS) -> None:
     now = time.time()
     stale_user_ids = [uid for uid, ts in _move_users_with_cache.items() if now - ts > timeout_seconds]
     for uid in stale_user_ids:
         release_move_cache(uid)
-
 
 def release_move_cache(user_id: int) -> None:
     global _move_cache_usage
@@ -273,13 +336,11 @@ def release_move_cache(user_id: int) -> None:
         _move_users_with_cache.pop(user_id, None)
     _cleanup_move_cache_if_unused()
 
-
 def _cleanup_move_cache_if_unused() -> None:
     global _move_tech_plates_cache, _move_cache_usage
     if _move_cache_usage <= 0 and not _move_users_with_cache:
         _move_tech_plates_cache = None
         _move_cache_usage = 0
-
 
 def reset_move_cache() -> None:
     global _move_tech_plates_cache, _move_cache_usage
@@ -287,18 +348,15 @@ def reset_move_cache() -> None:
     _move_cache_usage = 0
     _move_users_with_cache.clear()
 
-
 def get_move_cache_user_ids() -> list[int]:
     return sorted(_move_users_with_cache.keys())
 
-
 def _company_chat_id(company: str) -> int:
     if company == "СитиДрайв":
-        return int(DAMAGE_CHAT_ID_CITY)
+        return int(MOVE_MAX_CHAT_ID_CITY)
     if company == "Яндекс":
-        return int(DAMAGE_CHAT_ID_YANDEX)
-    return int(DAMAGE_CHAT_ID_BELKA)
-
+        return int(MOVE_MAX_CHAT_ID_YANDEX)
+    return int(MOVE_MAX_CHAT_ID_BELKA)
 
 def _telegram_target_for_move(company: str) -> tuple[int, int | None]:
     if company == "СитиДрайв":
@@ -306,7 +364,6 @@ def _telegram_target_for_move(company: str) -> tuple[int, int | None]:
     if company == "Яндекс":
         return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_MOVE_YANDEX or None)
     return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_MOVE_BELKA or None)
-
 
 def _item_to_line(item: MoveItem) -> str:
     head = (
@@ -337,17 +394,14 @@ def _item_to_line(item: MoveItem) -> str:
     tail = " | ".join(details) + " |" if details else "|"
     return head + tail
 
-
 def get_report_move_list(flow: MoveFlow) -> list[str]:
     return [_item_to_line(item) for item in flow.items]
-
 
 def get_report_move_str(flow: MoveFlow) -> str:
     lines = get_report_move_list(flow)
     if not lines:
         return ""
     return "\n\n".join(lines)
-
 
 def _build_sheet_rows(flow: MoveFlow, message_ref: str) -> list[list[str]]:
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
@@ -392,19 +446,73 @@ def _build_sheet_rows(flow: MoveFlow, message_ref: str) -> list[list[str]]:
             ])
     return rows
 
-
 def _is_pickup_from_stock(flow: MoveFlow) -> bool:
     action = str(flow.data.get("action") or "")
     return _normalize(action) == _normalize("Забираете со склада")
 
-
 async def _ask_tech_grz(flow: MoveFlow, chat_id: int, text: str, include_back: bool = True) -> None:
     options = flow.data.get("tech_grz_options") or []
+    if not options:
+        try:
+            options = await asyncio.to_thread(acquire_move_cache, flow.data.get("user_id"), True)
+            flow.data["tech_grz_options"] = options or []
+        except Exception:
+            logger.exception("failed to lazy reload tech plates for move")
+            options = []
+
     if options:
-        await _ask(flow, chat_id, text, options, include_back=include_back)
+        flow.data["tech_grz_prompt_text"] = text
+        await _ask_paginated(flow, chat_id, text, options, state_key="tech_grz", include_back=include_back)
         return
     await _send_plain(flow, chat_id, text.replace(" (можно ввести вручную)", ""))
 
+async def _ask_manual_reference_options(
+    flow: MoveFlow,
+    chat_id: int,
+    state_key: str,
+    text: str,
+    options: list[str],
+    include_back: bool = True,
+) -> None:
+    flow.data[f"{state_key}_prompt_text"] = text
+    flow.data[f"{state_key}_options"] = list(options)
+    if options:
+        await _ask_paginated(flow, chat_id, text, options, state_key=state_key, include_back=include_back)
+        return
+    await _send_plain(flow, chat_id, text)
+
+async def _reask_manual_reference_step(flow: MoveFlow, chat_id: int, state_key: str, include_back: bool = True) -> None:
+    await _ask_manual_reference_options(
+        flow,
+        chat_id,
+        state_key,
+        str(flow.data.get(f"{state_key}_prompt_text") or ""),
+        flow.data.get(f"{state_key}_options") or [],
+        include_back=include_back,
+    )
+
+def _value_in_step_options(flow: MoveFlow, state_key: str, value: str) -> bool:
+    options = flow.data.get(f"{state_key}_options") or []
+    return (not options) or value in options
+
+def _load_manual_step_options(flow: MoveFlow, state_key: str, force_reload: bool = False) -> list[str]:
+    company = str(flow.data.get("company") or "")
+    draft: MoveItem = flow.data.get("item_draft") or MoveItem()
+    if not company:
+        return []
+    if state_key == "item_marka_ts":
+        return get_move_marka_ts_options(company, force_reload=force_reload)
+    if state_key == "item_radius":
+        return get_move_radius_options(company, draft.marka_ts, force_reload=force_reload)
+    if state_key == "item_razmer":
+        return get_move_razmer_options(company, draft.marka_ts, draft.radius, force_reload=force_reload)
+    if state_key == "item_marka_rez":
+        return get_move_marka_options(company, draft.marka_ts, draft.radius, draft.razmer, force_reload=force_reload)
+    if state_key == "item_model_rez":
+        return get_move_model_options(company, draft.marka_ts, draft.radius, draft.razmer, draft.marka_rez, force_reload=force_reload)
+    if state_key == "item_sezon":
+        return get_move_sezon_options(company, draft.marka_ts, draft.radius, draft.razmer, draft.marka_rez, draft.model_rez, force_reload=force_reload)
+    return []
 
 async def _send_files_prompt(flow: MoveFlow, chat_id: int, text: str) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
@@ -421,7 +529,6 @@ async def _send_files_prompt(flow: MoveFlow, chat_id: int, text: str) -> None:
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
-
 async def _send_need_more_prompt(flow: MoveFlow, chat_id: int) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
@@ -436,7 +543,6 @@ async def _send_need_more_prompt(flow: MoveFlow, chat_id: int) -> None:
     msg_id = extract_message_id(response)
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
-
 
 async def _send_review_prompt(flow: MoveFlow, chat_id: int) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
@@ -454,37 +560,49 @@ async def _send_review_prompt(flow: MoveFlow, chat_id: int) -> None:
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
-
 async def _send_delete_prompt(flow: MoveFlow, chat_id: int) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
         await delete_message(chat_id, prev_msg_id)
 
     lines = get_report_move_list(flow)
+    flow.data["delete_prompt_text"] = "Удалить:"
+    flow.data["delete_lines"] = list(lines)
+    page = int(flow.data.get("delete_page", 0) or 0)
+    page_lines, has_prev, has_more, page = _paginate_options(lines, page)
+    flow.data["delete_page"] = page
+
+    button_texts = list(page_lines)
+    button_payloads = list(page_lines)
+    if has_prev:
+        button_texts.append(_PAGINATION_PREV_TEXT)
+        button_payloads.append(_PAGINATION_PREV_PAYLOAD)
+    if has_more:
+        button_texts.append(_PAGINATION_MORE_TEXT)
+        button_payloads.append(_PAGINATION_MORE_PAYLOAD)
+    button_texts.extend(["Завершить", "Добавить запись", "Выход"])
+    button_payloads.extend(["move_delete_done", "move_add", "move_exit"])
+
     response = await send_text_with_reply_buttons(
         chat_id=chat_id,
         text="Удалить:",
-        button_texts=lines + ["Завершить", "Добавить запись", "Выход"],
-        button_payloads=lines + ["move_delete_done", "move_add", "move_exit"],
+        button_texts=button_texts,
+        button_payloads=button_payloads,
     )
     msg_id = extract_message_id(response)
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
 
-
 async def _ask_pickup_type(flow: MoveFlow, chat_id: int) -> None:
     await _ask(flow, chat_id, "Выберите вариант из предложенных:", _KEY_WHEEL_TYPE)
 
-
 async def _ask_pickup_option(flow: MoveFlow, chat_id: int, wheel_type: str) -> bool:
-    if not callable(load_xab_cache) or not callable(get_xab_koles):
-        await send_text(chat_id, "Не найдены функции Хаба load_xab_cache/get_xab_koles. Проверьте import в move.py")
-        return False
-
     company = str(flow.data.get("company") or "")
     try:
-        await asyncio.to_thread(load_xab_cache)
-        options = await asyncio.to_thread(get_xab_koles, company, wheel_type, flow.data.get("user_id"))
+        options = await asyncio.to_thread(get_xab_koles, company, wheel_type)
+        if not options:
+            await asyncio.to_thread(load_xab_cache, True)
+            options = await asyncio.to_thread(get_xab_koles, company, wheel_type)
     except Exception:
         logger.exception("failed to load xab options")
         await send_text(chat_id, "❌ Не удалось обновить остатки Хаба из Google Таблицы. Повторите попытку позже.")
@@ -497,10 +615,11 @@ async def _ask_pickup_option(flow: MoveFlow, chat_id: int, wheel_type: str) -> b
 
     flow.data["pickup_type"] = wheel_type
     flow.data["pickup_options"] = options
+    flow.data["pickup_prompt_text"] = "Выберите вариант из предложенных:"
+    flow.data["pickup_options_page"] = 0
     flow.step = "pickup_option"
-    await _ask(flow, chat_id, "Выберите вариант из предложенных:", options)
+    await _ask_paginated(flow, chat_id, "Выберите вариант из предложенных:", options, state_key="pickup_options")
     return True
-
 
 def _append_pickup_item_from_option(flow: MoveFlow, option_text: str) -> None:
     temp = split_entry(option_text)
@@ -521,7 +640,6 @@ def _append_pickup_item_from_option(flow: MoveFlow, option_text: str) -> None:
         )
     )
 
-
 async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
     if chat_id < 0:
         await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
@@ -538,7 +656,7 @@ async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg
     st.flows_by_user[user_id] = MoveFlow(
         step="grz_tech",
         data={
-            "username": username,
+            "username": "",
             "fio": fio,
             "tech_grz_options": grz_options,
             "user_id": user_id,
@@ -546,22 +664,52 @@ async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg
     )
     await _ask_tech_grz(st.flows_by_user[user_id], chat_id, "ГРЗ технички (можно ввести вручную):", include_back=False)
 
-
 async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow) -> None:
-    out_chat = _company_chat_id(str(flow.data.get("company") or ""))
+    action = str(flow.data.get("action") or "")
+    company = str(flow.data.get("company") or "")
+    username = str(flow.data.get("username") or "").strip()
+    grz_tech = str(flow.data.get("grz_tech") or "").strip()
     text = _render_report(flow)
+
+    if action != "Сдаете бой":
+        try:
+            ok = await asyncio.to_thread(
+                update_xab_koles_bulk,
+                company,
+                list(flow.items),
+                username,
+                grz_tech,
+            )
+        except Exception:
+            logger.exception("failed to update xab before sending move report")
+            ok = 0
+
+        if ok != 1:
+            await send_text(
+                chat_id,
+                "Не удалось списать позиции из хаба: вероятно, комплект уже забран/недоступен. Обновите список и попробуйте снова",
+            )
+            release_move_cache(user_id)
+            return
+
+        # cache refreshed inside update_xab_koles_bulk
+
+    out_chat = _company_chat_id(company)
     max_link = ""
+    max_sent = False
     try:
         response = await send_message(chat_id=out_chat, text=text, attachments=flow.files)
         message_id = extract_message_id(response)
         if message_id:
             max_link = f"max://chat/{out_chat}/message/{message_id}"
+        max_sent = True
     except Exception:
         logger.exception("failed to send move report to company chat")
 
     telegram_link = ""
+    telegram_sent = False
     try:
-        tg_chat_id, tg_thread_id = _telegram_target_for_move(str(flow.data.get("company") or ""))
+        tg_chat_id, tg_thread_id = _telegram_target_for_move(company)
         telegram_link = await send_telegram_report(
             chat_id=tg_chat_id,
             thread_id=tg_thread_id,
@@ -569,8 +717,17 @@ async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow
             attachments=flow.files,
             bot_token=TELEGRAM_BOT_TOKEN_TECHNIK,
         ) or ""
+        telegram_sent = True
     except Exception:
         logger.exception("failed to mirror move report to telegram")
+
+    if not max_sent and not telegram_sent:
+        await send_text(
+            chat_id,
+            "Позиции из хаба списаны, но не удалось отправить отчёт в чаты. Запись в таблицу не выполнена. Обратитесь к разработчикам.",
+        )
+        release_move_cache(user_id)
+        return
 
     report_link = telegram_link or max_link
 
@@ -579,17 +736,22 @@ async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow
         for row in rows:
             logger.info("[MOVE->GSHEETS] sheet=%s row=%s", "Выгрузка передача", row)
             write_in_answers_ras(row, "Выгрузка передача")
-        if str(flow.data.get("action") or "") == "Сдаете бой":
+        if action == "Сдаете бой":
             for row in rows:
                 logger.info("[MOVE->GSHEETS] sheet=%s row=%s", "Онлайн остатки Бой", row)
                 write_in_answers_ras(row, "Онлайн остатки Бой")
     except Exception:
         logger.exception("failed to write move report rows")
+        await send_text(
+            chat_id,
+            "Позиции обработаны, но при записи в таблицу произошла ошибка. Обратитесь к разработчикам.",
+        )
+        release_move_cache(user_id)
+        return
 
     await send_text(chat_id, "Ваша заявка сформирована")
     st.flows_by_user.pop(user_id, None)
     release_move_cache(user_id)
-
 
 def _render_report(flow: MoveFlow) -> str:
     data = flow.data
@@ -602,7 +764,6 @@ def _render_report(flow: MoveFlow) -> str:
     base += f"🏪{data.get('company', '—')}\n\n"
     base += get_report_move_str(flow)
     return base
-
 
 async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
     cleanup_stale_move_cache_users()
@@ -621,6 +782,28 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         return True
 
     if flow.step == "grz_tech":
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "tech_grz")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("tech_grz_prompt_text") or "ГРЗ технички (можно ввести вручную):"),
+                flow.data.get("tech_grz_options") or [],
+                state_key="tech_grz",
+                include_back=False,
+            )
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "tech_grz")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("tech_grz_prompt_text") or "ГРЗ технички (можно ввести вручную):"),
+                flow.data.get("tech_grz_options") or [],
+                state_key="tech_grz",
+                include_back=False,
+            )
+            return True
         plate = text.strip().upper()
         if not (_tech_plate_is_known(flow, plate) or _is_plate_format(plate)):
             await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
@@ -651,6 +834,28 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             flow.step = "action"
             await _ask(flow, chat_id, "Действие:", _KEY_ACTION, include_back=False)
             return True
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "tech_grz")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("tech_grz_prompt_text") or "Кому передаете:"),
+                flow.data.get("tech_grz_options") or [],
+                state_key="tech_grz",
+                include_back=True,
+            )
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "tech_grz")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("tech_grz_prompt_text") or "Кому передаете:"),
+                flow.data.get("tech_grz_options") or [],
+                state_key="tech_grz",
+                include_back=True,
+            )
+            return True
         plate = text.strip().upper()
         if not (_tech_plate_is_known(flow, plate) or _is_plate_format(plate)):
             await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
@@ -679,7 +884,10 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             await _ask_pickup_type(flow, chat_id)
             return True
         flow.step = "item_marka_ts"
-        await _send_plain(flow, chat_id, "Марка автомобиля:")
+        options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_ts")
+        if not options:
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_ts", True)
+        await _ask_manual_reference_options(flow, chat_id, "item_marka_ts", "Марка автомобиля:", options)
         return True
 
     if flow.step == "pickup_type":
@@ -698,16 +906,44 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "pickup_option":
         if ctrl == "back":
+            _pagination_reset(flow, "pickup_options")
             flow.step = "pickup_type"
             await _ask_pickup_type(flow, chat_id)
+            return True
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "pickup_options")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("pickup_prompt_text") or "Выберите вариант из предложенных:"),
+                flow.data.get("pickup_options") or [],
+                state_key="pickup_options",
+            )
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "pickup_options")
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("pickup_prompt_text") or "Выберите вариант из предложенных:"),
+                flow.data.get("pickup_options") or [],
+                state_key="pickup_options",
+            )
             return True
         options = flow.data.get("pickup_options") or []
         value = text.strip()
         if value not in options:
-            await _ask(flow, chat_id, "Выберите вариант из предложенных:", options)
+            await _ask_paginated(
+                flow,
+                chat_id,
+                str(flow.data.get("pickup_prompt_text") or "Выберите вариант из предложенных:"),
+                options,
+                state_key="pickup_options",
+            )
             return True
         _append_pickup_item_from_option(flow, value)
         flow.data.pop("pickup_options", None)
+        _pagination_reset(flow, "pickup_options")
         flow.step = "need_more"
         await _send_need_more_prompt(flow, chat_id)
         return True
@@ -719,74 +955,164 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             flow.step = "company"
             await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
-        draft.marka_ts = text.strip()
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_marka_ts")
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_ts")
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_marka_ts")
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_ts")
+            return True
+        value = text.strip()
+        if not _value_in_step_options(flow, "item_marka_ts", value):
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_ts")
+            return True
+        draft.marka_ts = value
         flow.data["item_draft"] = draft
         flow.step = "item_radius"
-        await _send_plain(flow, chat_id, "Радиус:")
+        options = await asyncio.to_thread(_load_manual_step_options, flow, "item_radius")
+        await _ask_manual_reference_options(flow, chat_id, "item_radius", "Радиус:", options)
         return True
 
     if flow.step == "item_radius":
         if ctrl == "back":
             flow.step = "item_marka_ts"
-            await _send_plain(flow, chat_id, "Марка автомобиля:")
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_ts")
+            await _ask_manual_reference_options(flow, chat_id, "item_marka_ts", "Марка автомобиля:", options)
             return True
-        draft.radius = text.strip().upper()
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_radius")
+            await _reask_manual_reference_step(flow, chat_id, "item_radius")
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_radius")
+            await _reask_manual_reference_step(flow, chat_id, "item_radius")
+            return True
+        value = text.strip().upper()
+        if not _value_in_step_options(flow, "item_radius", value):
+            await _reask_manual_reference_step(flow, chat_id, "item_radius")
+            return True
+        draft.radius = value
         flow.data["item_draft"] = draft
         flow.step = "item_razmer"
-        await _send_plain(flow, chat_id, "Размер:")
+        options = await asyncio.to_thread(_load_manual_step_options, flow, "item_razmer")
+        await _ask_manual_reference_options(flow, chat_id, "item_razmer", "Размер:", options)
         return True
 
     if flow.step == "item_razmer":
         if ctrl == "back":
             flow.step = "item_radius"
-            await _send_plain(flow, chat_id, "Радиус:")
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_radius")
+            await _ask_manual_reference_options(flow, chat_id, "item_radius", "Радиус:", options)
             return True
-        draft.razmer = text.strip()
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_razmer")
+            await _reask_manual_reference_step(flow, chat_id, "item_razmer")
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_razmer")
+            await _reask_manual_reference_step(flow, chat_id, "item_razmer")
+            return True
+        value = text.strip()
+        if not _value_in_step_options(flow, "item_razmer", value):
+            await _reask_manual_reference_step(flow, chat_id, "item_razmer")
+            return True
+        draft.razmer = value
         flow.data["item_draft"] = draft
         flow.step = "item_marka_rez"
-        await _send_plain(flow, chat_id, "Марка:")
+        options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_rez")
+        await _ask_manual_reference_options(flow, chat_id, "item_marka_rez", "Марка:", options)
         return True
 
     if flow.step == "item_marka_rez":
         if ctrl == "back":
             flow.step = "item_razmer"
-            await _send_plain(flow, chat_id, "Размер:")
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_razmer")
+            await _ask_manual_reference_options(flow, chat_id, "item_razmer", "Размер:", options)
             return True
-        draft.marka_rez = text.strip()
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_marka_rez")
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_rez")
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_marka_rez")
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_rez")
+            return True
+        value = text.strip()
+        if not _value_in_step_options(flow, "item_marka_rez", value):
+            await _reask_manual_reference_step(flow, chat_id, "item_marka_rez")
+            return True
+        draft.marka_rez = value
         flow.data["item_draft"] = draft
         flow.step = "item_model_rez"
-        await _send_plain(flow, chat_id, "Модель:")
+        options = await asyncio.to_thread(_load_manual_step_options, flow, "item_model_rez")
+        await _ask_manual_reference_options(flow, chat_id, "item_model_rez", "Модель:", options)
         return True
 
     if flow.step == "item_model_rez":
         if ctrl == "back":
             flow.step = "item_marka_rez"
-            await _send_plain(flow, chat_id, "Марка:")
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_rez")
+            await _ask_manual_reference_options(flow, chat_id, "item_marka_rez", "Марка:", options)
             return True
-        draft.model_rez = text.strip()
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_model_rez")
+            await _reask_manual_reference_step(flow, chat_id, "item_model_rez")
+            return True
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_model_rez")
+            await _reask_manual_reference_step(flow, chat_id, "item_model_rez")
+            return True
+        value = text.strip()
+        if not _value_in_step_options(flow, "item_model_rez", value):
+            await _reask_manual_reference_step(flow, chat_id, "item_model_rez")
+            return True
+        draft.model_rez = value
         flow.data["item_draft"] = draft
+        sezon_options = await asyncio.to_thread(_load_manual_step_options, flow, "item_sezon")
+        if len(sezon_options) == 1:
+            draft.sezon = sezon_options[0]
+            flow.data["item_draft"] = draft
+            flow.step = "item_tip_diska"
+            await _ask(flow, chat_id, "Тип диска:", key_type_disk)
+            return True
         flow.step = "item_sezon"
-        await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
+        await _ask_manual_reference_options(flow, chat_id, "item_sezon", "Сезон:", sezon_options or _KEY_SEASON)
         return True
 
     if flow.step == "item_sezon":
         if ctrl == "back":
             flow.step = "item_model_rez"
-            await _send_plain(flow, chat_id, "Модель:")
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_model_rez")
+            await _ask_manual_reference_options(flow, chat_id, "item_model_rez", "Модель:", options)
             return True
-        if text.strip() not in _KEY_SEASON:
-            await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
+        if ctrl == "prev_page":
+            _pagination_prev_page(flow, "item_sezon")
+            await _reask_manual_reference_step(flow, chat_id, "item_sezon")
             return True
-        draft.sezon = text.strip()
+        if ctrl == "more":
+            _pagination_next_page(flow, "item_sezon")
+            await _reask_manual_reference_step(flow, chat_id, "item_sezon")
+            return True
+        value = text.strip()
+        if not _value_in_step_options(flow, "item_sezon", value):
+            if flow.data.get("item_sezon_options"):
+                await _reask_manual_reference_step(flow, chat_id, "item_sezon")
+                return True
+            if value not in _KEY_SEASON:
+                await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
+                return True
+        draft.sezon = value
         flow.data["item_draft"] = draft
         flow.step = "item_tip_diska"
-        await _send_plain(flow, chat_id, "Тип диска:")
+        await _ask(flow, chat_id, "Тип диска:", key_type_disk)
         return True
 
     if flow.step == "item_tip_diska":
         if ctrl == "back":
             flow.step = "item_sezon"
-            await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
+            options = await asyncio.to_thread(_load_manual_step_options, flow, "item_sezon")
+            await _ask_manual_reference_options(flow, chat_id, "item_sezon", "Сезон:", options or _KEY_SEASON)
             return True
         draft.tip_diska = text.strip()
         flow.data["item_draft"] = draft
@@ -797,7 +1123,7 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
     if flow.step == "item_count_left":
         if ctrl == "back":
             flow.step = "item_tip_diska"
-            await _send_plain(flow, chat_id, "Тип диска:")
+            await _ask(flow, chat_id, "Тип диска:", key_type_disk)
             return True
         try:
             draft.count_left = int(text.strip())
@@ -844,7 +1170,8 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
                 await _ask_pickup_type(flow, chat_id)
             else:
                 flow.step = "item_marka_ts"
-                await _send_plain(flow, chat_id, "Марка автомобиля:")
+                options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_ts")
+                await _ask_manual_reference_options(flow, chat_id, "item_marka_ts", "Марка автомобиля:", options)
             return True
         if text.strip() == "Нет":
             if not flow.items:
@@ -866,6 +1193,7 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             await _send_files_prompt(flow, chat_id, "Прикрепите от 2 до 10 фото")
             return True
         if ctrl == "fix":
+            flow.data["delete_page"] = 0
             flow.step = "delete_item"
             await _send_delete_prompt(flow, chat_id)
             return True
@@ -873,6 +1201,14 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         return True
 
     if flow.step == "delete_item":
+        if ctrl == "prev_page":
+            flow.data["delete_page"] = max(0, int(flow.data.get("delete_page", 0) or 0) - 1)
+            await _send_delete_prompt(flow, chat_id)
+            return True
+        if ctrl == "more":
+            flow.data["delete_page"] = int(flow.data.get("delete_page", 0) or 0) + 1
+            await _send_delete_prompt(flow, chat_id)
+            return True
         if ctrl == "add":
             flow.data["item_draft"] = MoveItem()
             if _is_pickup_from_stock(flow):
@@ -880,7 +1216,8 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
                 await _ask_pickup_type(flow, chat_id)
             else:
                 flow.step = "item_marka_ts"
-                await _send_plain(flow, chat_id, "Марка автомобиля:")
+                options = await asyncio.to_thread(_load_manual_step_options, flow, "item_marka_ts")
+                await _ask_manual_reference_options(flow, chat_id, "item_marka_ts", "Марка автомобиля:", options)
             return True
         if ctrl == "delete_done":
             if not flow.items:
@@ -920,7 +1257,6 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         return True
 
     return True
-
 
 def reset_move_progress(st: MoveState, user_id: int) -> None:
     st.flows_by_user.pop(user_id, None)

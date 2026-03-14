@@ -703,3 +703,389 @@ def load_parking_task_grz_by_company() -> dict[str, list[str]]:
         out[company] = sorted(values)
 
     return out
+
+
+# ===== Move helpers / caches =====
+_MOVE_REF_CACHE: Optional[dict[str, list[list[str]]]] = None
+_MOVE_CAR_CACHE: Optional[dict[str, list[list[str]]]] = None
+_MOVE_XAB_CACHE: Optional[dict[tuple[str, str, str, str, str, str, str], list[list[str]]]] = None
+
+_MOVE_REZ_RADIUS = 1
+_MOVE_REZ_RAZMER = 2
+_MOVE_REZ_SEZON = 3
+_MOVE_REZ_MARKA = 4
+_MOVE_REZ_MODEL = 5
+
+_MOVE_CAR_MARKA_CITY = 2
+_MOVE_CAR_MARKA_YANDEX = 3
+_MOVE_CAR_MARKA_BELKA = 1
+
+
+def _move_company_key(company: str) -> str:
+    company = str(company).strip()
+    if company == "СитиДрайв":
+        return "city"
+    if company == "Яндекс":
+        return "yandex"
+    return "belka"
+
+
+def _move_rez_sheet_title(company: str) -> str:
+    if str(company).strip() == "СитиДрайв":
+        return "Резина Сити"
+    if str(company).strip() == "Яндекс":
+        return "Резина ЯД"
+    return "Резина Белка"
+
+
+def _move_car_sheet_title(company: str) -> str:
+    if str(company).strip() == "СитиДрайв":
+        return "Перечень ТС Сити"
+    if str(company).strip() == "Яндекс":
+        return "Перечень ТС Яд"
+    return "Перечень ТС Белка"
+
+
+def _move_car_marka_index(company: str) -> int:
+    if str(company).strip() == "СитиДрайв":
+        return _MOVE_CAR_MARKA_CITY
+    if str(company).strip() == "Яндекс":
+        return _MOVE_CAR_MARKA_YANDEX
+    return _MOVE_CAR_MARKA_BELKA
+
+
+def load_move_reference_cache(force_reload: bool = False) -> dict[str, list[list[str]]]:
+    global _MOVE_REF_CACHE
+    if _MOVE_REF_CACHE is not None and _MOVE_REF_CACHE and not force_reload:
+        return _MOVE_REF_CACHE
+
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+
+    def _sheet_values(title: str) -> list[list[str]]:
+        return sh_main.worksheet(title).get_all_values()[1:]
+
+    _MOVE_REF_CACHE = {
+        "city": _sheet_values("Резина Сити"),
+        "yandex": _sheet_values("Резина ЯД"),
+        "belka": _sheet_values("Резина Белка"),
+    }
+    return _MOVE_REF_CACHE
+
+
+def load_move_car_cache(force_reload: bool = False) -> dict[str, list[list[str]]]:
+    global _MOVE_CAR_CACHE
+    if _MOVE_CAR_CACHE is not None and _MOVE_CAR_CACHE and not force_reload:
+        return _MOVE_CAR_CACHE
+
+    gc: Client = gspread.service_account("app/creds.json")
+    sh_main = gc.open_by_url(GSPREAD_URL_MAIN)
+
+    def _sheet_values(title: str) -> list[list[str]]:
+        return sh_main.worksheet(title).get_all_values()[1:]
+
+    _MOVE_CAR_CACHE = {
+        "city": _sheet_values("Перечень ТС Сити"),
+        "yandex": _sheet_values("Перечень ТС Яд"),
+        "belka": _sheet_values("Перечень ТС Белка"),
+    }
+    return _MOVE_CAR_CACHE
+
+
+def _ensure_move_reference_rows(company: str, force_reload: bool = False) -> list[list[str]]:
+    cache = load_move_reference_cache(force_reload=force_reload)
+    rows = cache.get(_move_company_key(company), [])
+    if not rows and not force_reload:
+        rows = load_move_reference_cache(force_reload=True).get(_move_company_key(company), [])
+    return rows
+
+
+def _ensure_move_car_rows(company: str, force_reload: bool = False) -> list[list[str]]:
+    cache = load_move_car_cache(force_reload=force_reload)
+    rows = cache.get(_move_company_key(company), [])
+    if not rows and not force_reload:
+        rows = load_move_car_cache(force_reload=True).get(_move_company_key(company), [])
+    return rows
+
+
+def _move_filtered_rows(
+    company: str,
+    radius: str | None = None,
+    razmer: str | None = None,
+    marka_rez: str | None = None,
+    model_rez: str | None = None,
+    force_reload: bool = False,
+) -> list[list[str]]:
+    rows = _ensure_move_reference_rows(company, force_reload=force_reload)
+    out: list[list[str]] = []
+    for row in rows:
+        if len(row) <= _MOVE_REZ_MODEL:
+            continue
+        if radius is not None and str(row[_MOVE_REZ_RADIUS]).strip() != str(radius).strip():
+            continue
+        if razmer is not None and str(row[_MOVE_REZ_RAZMER]).strip() != str(razmer).strip():
+            continue
+        if marka_rez is not None and str(row[_MOVE_REZ_MARKA]).strip() != str(marka_rez).strip():
+            continue
+        if model_rez is not None and str(row[_MOVE_REZ_MODEL]).strip() != str(model_rez).strip():
+            continue
+        out.append(row)
+    return out
+
+
+def _unique_sorted(values: list[str]) -> list[str]:
+    return sorted({str(v).strip() for v in values if str(v).strip()})
+
+
+def get_move_marka_ts_options(company: str, force_reload: bool = False) -> list[str]:
+    rows = _ensure_move_car_rows(company, force_reload=force_reload)
+    idx = _move_car_marka_index(company)
+    return _unique_sorted([row[idx] for row in rows if len(row) > idx])
+
+
+def get_move_radius_options(company: str, marka_ts: str = "", force_reload: bool = False) -> list[str]:
+    rows = _move_filtered_rows(company, force_reload=force_reload)
+    vals = _unique_sorted([row[_MOVE_REZ_RADIUS] for row in rows if len(row) > _MOVE_REZ_RADIUS])
+    def sort_key(v: str):
+        s = str(v).strip()
+        return (0, int(s)) if s.isdigit() else (1, s)
+    return sorted(vals, key=sort_key)
+
+
+def get_move_razmer_options(company: str, marka_ts: str, radius: str, force_reload: bool = False) -> list[str]:
+    rows = _move_filtered_rows(company, radius=radius, force_reload=force_reload)
+    return _unique_sorted([row[_MOVE_REZ_RAZMER] for row in rows if len(row) > _MOVE_REZ_RAZMER])
+
+
+def get_move_marka_options(company: str, marka_ts: str, radius: str, razmer: str, force_reload: bool = False) -> list[str]:
+    rows = _move_filtered_rows(company, radius=radius, razmer=razmer, force_reload=force_reload)
+    return _unique_sorted([row[_MOVE_REZ_MARKA] for row in rows if len(row) > _MOVE_REZ_MARKA])
+
+
+def get_move_model_options(company: str, marka_ts: str, radius: str, razmer: str, marka_rez: str, force_reload: bool = False) -> list[str]:
+    rows = _move_filtered_rows(
+        company,
+        radius=radius,
+        razmer=razmer,
+        marka_rez=marka_rez,
+        force_reload=force_reload,
+    )
+    return _unique_sorted([row[_MOVE_REZ_MODEL] for row in rows if len(row) > _MOVE_REZ_MODEL])
+
+
+def get_move_sezon_options(
+    company: str,
+    marka_ts: str,
+    radius: str,
+    razmer: str,
+    marka_rez: str,
+    model_rez: str,
+    force_reload: bool = False,
+) -> list[str]:
+    rows = _move_filtered_rows(
+        company,
+        radius=radius,
+        razmer=razmer,
+        marka_rez=marka_rez,
+        model_rez=model_rez,
+        force_reload=force_reload,
+    )
+    return _unique_sorted([row[_MOVE_REZ_SEZON] for row in rows if len(row) > _MOVE_REZ_SEZON])
+
+
+def reset_move_reference_cache() -> None:
+    global _MOVE_REF_CACHE, _MOVE_CAR_CACHE
+    _MOVE_REF_CACHE = None
+    _MOVE_CAR_CACHE = None
+
+
+def _open_move_xab_sheet():
+    gc: Client = gspread.service_account("app/creds.json")
+    sh = gc.open_by_url(GSPREAD_URL_ANSWER)
+    return sh.worksheet("Онлайн остатки Хаба")
+
+
+def load_xab_cache(force_reload: bool = False) -> dict[tuple[str, str, str, str, str, str, str], list[list[str]]]:
+    global _MOVE_XAB_CACHE
+    if _MOVE_XAB_CACHE is not None and _MOVE_XAB_CACHE and not force_reload:
+        return _MOVE_XAB_CACHE
+
+    ws = _open_move_xab_sheet()
+    rows = ws.get_all_values()
+    groups: dict[tuple[str, str, str, str, str, str, str], list[list[str]]] = {}
+    for row in rows[1:]:
+        if len(row) < 14:
+            continue
+        key = (
+            str(row[2]).strip(),
+            str(row[3]).strip(),
+            str(row[4]).strip(),
+            str(row[5]).strip(),
+            str(row[6]).strip(),
+            str(row[7]).strip(),
+            str(row[8]).strip(),
+        )
+        groups.setdefault(key, []).append(row)
+    _MOVE_XAB_CACHE = groups
+    return groups
+
+
+def get_xab_koles(company: str, wheel_type: str) -> list[str]:
+    cache = load_xab_cache(force_reload=False)
+    if not cache:
+        cache = load_xab_cache(force_reload=True)
+
+    result: list[str] = []
+    if not cache:
+        return result
+    for key, rows in cache.items():
+        filtered_rows = [r for r in rows if len(r) > 9 and str(r[1]).strip() == str(company).strip()]
+        if not filtered_rows:
+            continue
+        if wheel_type in ["Правое", "Левое"]:
+            if any(str(r[9]).strip() == wheel_type for r in filtered_rows):
+                result.append("|".join(key))
+        elif wheel_type == "Ось":
+            wheels = [str(r[9]).strip() for r in filtered_rows]
+            if "Левое" in wheels and "Правое" in wheels:
+                result.append("|".join(key))
+        elif wheel_type == "Комплект":
+            wheels = [str(r[9]).strip() for r in filtered_rows]
+            if wheels.count("Левое") >= 2 and wheels.count("Правое") >= 2:
+                result.append("|".join(key))
+    result.sort()
+    return result
+
+
+def _item_to_xab_key_tuple(item: Any) -> tuple[str, str, str, str, str, str, str]:
+    return (
+        str(getattr(item, "marka_ts", "")).strip(),
+        str(getattr(item, "radius", "")).strip(),
+        str(getattr(item, "razmer", "")).strip(),
+        str(getattr(item, "marka_rez", "")).strip(),
+        str(getattr(item, "model_rez", "")).strip(),
+        str(getattr(item, "sezon", "")).strip(),
+        str(getattr(item, "tip_diska", "")).strip(),
+    )
+
+
+def update_xab_koles_bulk(company: str, items: list[Any], username: str, grz_tech: str) -> int:
+    try:
+        gc: Client = gspread.service_account("app/creds.json")
+        sh: Spreadsheet = gc.open_by_url(GSPREAD_URL_ANSWER)
+
+        ws_direct = sh.worksheet("Онлайн остатки Хаба")
+        ws_upload = sh.worksheet("Выгрузка сборка")
+
+        direct_data = ws_direct.get_all_values()
+        upload_data = ws_upload.get_all_values()
+
+        upload_index: dict[tuple[str, ...], list[int]] = {}
+        for i, row in enumerate(upload_data[1:], start=2):
+            padded = (row[:14] if len(row) >= 14 else row + [""] * (14 - len(row)))
+            key = tuple(str(v).strip() for v in padded[:14])
+            upload_index.setdefault(key, []).append(i)
+
+        need_map: dict[tuple[str, str, str, str, str, str, str], dict[str, int]] = {}
+        requested_total = 0
+        for item in items:
+            key_tuple = _item_to_xab_key_tuple(item)
+            need = need_map.setdefault(key_tuple, {"Левое": 0, "Правое": 0})
+            left_need = int(getattr(item, 'count_left', 0) or 0)
+            right_need = int(getattr(item, 'count_right', 0) or 0)
+            need["Левое"] += left_need
+            need["Правое"] += right_need
+            requested_total += left_need + right_need
+
+        deletion_row_indexes: list[int] = []
+        current_date = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y")
+        updates: list[tuple[int, list[str]]] = []
+
+        for row_index, row in enumerate(direct_data[1:], start=2):
+            if len(row) < 14:
+                continue
+            if str(row[1]).strip() != str(company).strip():
+                continue
+
+            key_tuple = (
+                str(row[2]).strip(),
+                str(row[3]).strip(),
+                str(row[4]).strip(),
+                str(row[5]).strip(),
+                str(row[6]).strip(),
+                str(row[7]).strip(),
+                str(row[8]).strip(),
+            )
+            need = need_map.get(key_tuple)
+            if not need:
+                continue
+
+            pos = str(row[9]).strip()
+            if pos not in need or need[pos] <= 0:
+                continue
+
+            deletion_row_indexes.append(row_index)
+            need[pos] -= 1
+
+            candidate_key = tuple(str(v).strip() for v in row[:14])
+            rows_in_upload = upload_index.get(candidate_key, [])
+            if not rows_in_upload:
+                logger.warning(
+                    "update_xab_koles_bulk: не найдена строка в 'Выгрузка сборка' для списания. company=%s key=%s user=%s grz=%s",
+                    company, candidate_key, username, grz_tech
+                )
+                return 0
+
+            up_idx = rows_in_upload.pop(0)
+            updates.append((up_idx, [current_date, str(username), str(grz_tech)]))
+
+        selected_total = len(deletion_row_indexes)
+        updated_total = len(updates)
+
+        if requested_total > 0 and selected_total < requested_total:
+            logger.warning(
+                "update_xab_koles_bulk: недостаточно позиций в Хабе для списания. company=%s need=%s got=%s user=%s grz=%s",
+                company, requested_total, selected_total, username, grz_tech
+            )
+            return 0
+
+        if selected_total > 0 and updated_total != selected_total:
+            logger.warning(
+                "update_xab_koles_bulk: несоответствие количества отметок и списаний. company=%s deleted=%s updated=%s user=%s grz=%s",
+                company, selected_total, updated_total, username, grz_tech
+            )
+            return 0
+
+        if updates:
+            body = {
+                "valueInputOption": "USER_ENTERED",
+                "data": [
+                    {
+                        "range": f"'Выгрузка сборка'!O{row_idx}:Q{row_idx}",
+                        "values": [values],
+                    }
+                    for row_idx, values in updates
+                ],
+            }
+            sh.values_batch_update(body)
+
+        if deletion_row_indexes:
+            deletion_row_indexes.sort(reverse=True)
+            reqs = []
+            for row_idx in deletion_row_indexes:
+                reqs.append({
+                    "deleteDimension": {
+                        "range": {
+                            "sheetId": ws_direct.id,
+                            "dimension": "ROWS",
+                            "startIndex": row_idx - 1,
+                            "endIndex": row_idx,
+                        }
+                    }
+                })
+            sh.batch_update({"requests": reqs})
+        load_xab_cache(force_reload=True)
+        return 1
+    except Exception as e:
+        logger.exception("Ошибка в update_xab_koles_bulk: %s", e)
+        return 0
