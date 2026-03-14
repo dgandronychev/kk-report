@@ -31,11 +31,17 @@ from app.utils.max_api import (
     send_text_with_reply_buttons,
 )
 
+try:
+    from app.utils.gsheets import load_xab_cache, get_xab_koles
+except Exception:
+    load_xab_cache = None
+    get_xab_koles = None
+
 
 _KEY_ACTION = ["Забираете со склада", "Сдаете бой", "Передаете в техничку"]
 _KEY_COMPANY = ["СитиДрайв", "Яндекс", "Белка"]
 _KEY_SEASON = ["Лето", "Зима", "Шип", "Липучка", "Всесезон"]
-_KEY_WHEEL_TYPE = ["Комплект", "Ось", "Правое колесо", "Левое колесо"]
+_KEY_WHEEL_TYPE = ["Комплект", "Ось", "Правое", "Левое"]
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +49,7 @@ _MOVE_CACHE_TTL_SECONDS = 1800
 _move_tech_plates_cache: list[str] | None = None
 _move_cache_usage = 0
 _move_users_with_cache: dict[int, float] = {}
+
 
 @dataclass
 class MoveItem:
@@ -88,6 +95,47 @@ def _kb_control(include_back: bool = True) -> tuple[list[str], list[str]]:
 def _is_plate_format(value: str) -> bool:
     cleaned = re.sub(r"\s+", "", str(value).upper())
     return bool(re.match(r"^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{2,3}$", cleaned))
+
+
+def _normalize_wheel_type(value: str) -> str:
+    v = _normalize(value)
+    if v in {"правое", "правое колесо"}:
+        return "Правое"
+    if v in {"левое", "левое колесо"}:
+        return "Левое"
+    if v == "ось":
+        return "Ось"
+    if v == "комплект":
+        return "Комплект"
+    return value.strip()
+
+
+def _tech_plate_is_known(flow: MoveFlow, plate: str) -> bool:
+    options = flow.data.get("tech_grz_options") or []
+    plate_norm = re.sub(r"\s+", "", str(plate).upper())
+    for item in options:
+        if re.sub(r"\s+", "", str(item).upper()) == plate_norm:
+            return True
+    return False
+
+
+def _pickup_counts_by_type(type_name: str) -> tuple[int, int]:
+    if type_name == "Левое":
+        return 1, 0
+    if type_name == "Правое":
+        return 0, 1
+    if type_name == "Ось":
+        return 1, 1
+    if type_name == "Комплект":
+        return 2, 2
+    return 0, 0
+
+
+def split_entry(text: str) -> list[str]:
+    parts = [part.strip() for part in str(text).split("|")]
+    while len(parts) < 7:
+        parts.append("")
+    return parts[:7]
 
 
 async def _ask(flow: MoveFlow, chat_id: int, text: str, options: list[str], include_back: bool = True) -> None:
@@ -144,6 +192,12 @@ def _control(text: str, msg: dict) -> str:
         return "done"
     if "move_add" in norms or "добавить позицию" in norms:
         return "add"
+    if "move_ok" in norms or "заполнено корректно" in norms:
+        return "ok"
+    if "move_fix" in norms or "исправить" in norms:
+        return "fix"
+    if "move_delete_done" in norms or "завершить" in norms:
+        return "delete_done"
     return ""
 
 
@@ -164,7 +218,7 @@ def _extract_attachments(msg: dict, include_nested: bool = True) -> List[dict]:
         if not isinstance(item, dict):
             continue
         t = str(item.get("type") or "")
-        if t in {"image", "video", "file", "audio"}:
+        if t == "image":
             out.append({"type": t, "payload": item.get("payload")})
     return out
 
@@ -237,6 +291,7 @@ def reset_move_cache() -> None:
 def get_move_cache_user_ids() -> list[int]:
     return sorted(_move_users_with_cache.keys())
 
+
 def _company_chat_id(company: str) -> int:
     if company == "СитиДрайв":
         return int(DAMAGE_CHAT_ID_CITY)
@@ -244,12 +299,14 @@ def _company_chat_id(company: str) -> int:
         return int(DAMAGE_CHAT_ID_YANDEX)
     return int(DAMAGE_CHAT_ID_BELKA)
 
+
 def _telegram_target_for_move(company: str) -> tuple[int, int | None]:
     if company == "СитиДрайв":
         return TELEGRAM_CHAT_ID_SBORKA_CITY, (TELEGRAM_THREAD_ID_MOVE_CITY or None)
     if company == "Яндекс":
         return TELEGRAM_CHAT_ID_SBORKA_YANDEX, (TELEGRAM_THREAD_ID_MOVE_YANDEX or None)
     return TELEGRAM_CHAT_ID_SBORKA_BELKA, (TELEGRAM_THREAD_ID_MOVE_BELKA or None)
+
 
 def _item_to_line(item: MoveItem) -> str:
     head = (
@@ -280,6 +337,7 @@ def _item_to_line(item: MoveItem) -> str:
     tail = " | ".join(details) + " |" if details else "|"
     return head + tail
 
+
 def get_report_move_list(flow: MoveFlow) -> list[str]:
     return [_item_to_line(item) for item in flow.items]
 
@@ -288,7 +346,8 @@ def get_report_move_str(flow: MoveFlow) -> str:
     lines = get_report_move_list(flow)
     if not lines:
         return ""
-    return "\n".join(f"{idx + 1}. {line}" for idx, line in enumerate(lines))
+    return "\n\n".join(lines)
+
 
 def _build_sheet_rows(flow: MoveFlow, message_ref: str) -> list[list[str]]:
     now = (datetime.now() + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
@@ -338,25 +397,6 @@ def _is_pickup_from_stock(flow: MoveFlow) -> bool:
     action = str(flow.data.get("action") or "")
     return _normalize(action) == _normalize("Забираете со склада")
 
-async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
-    if chat_id < 0:
-        await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
-        return
-
-    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
-    cleanup_stale_move_cache_users()
-    grz_options: list[str] = []
-    try:
-        grz_options = await asyncio.to_thread(acquire_move_cache, user_id)
-    except Exception:
-        logger.exception("failed to load move cache with tech plates")
-
-    st.flows_by_user[user_id] = MoveFlow(
-        step="grz_tech",
-        data={"username": username, "fio": fio, "tech_grz_options": grz_options},
-    )
-    await _ask_tech_grz(st.flows_by_user[user_id], chat_id, "ГРЗ технички (можно ввести вручную):", include_back=False)
-
 
 async def _ask_tech_grz(flow: MoveFlow, chat_id: int, text: str, include_back: bool = True) -> None:
     options = flow.data.get("tech_grz_options") or []
@@ -382,21 +422,129 @@ async def _send_files_prompt(flow: MoveFlow, chat_id: int, text: str) -> None:
         flow.data["prompt_msg_id"] = msg_id
 
 
-async def _send_items_prompt(flow: MoveFlow, chat_id: int) -> None:
+async def _send_need_more_prompt(flow: MoveFlow, chat_id: int) -> None:
     prev_msg_id = flow.data.get("prompt_msg_id")
     if prev_msg_id:
         await delete_message(chat_id, prev_msg_id)
 
-    text = "Позиции:\n" + (get_report_move_str(flow) or "(пока пусто)")
     response = await send_text_with_reply_buttons(
         chat_id=chat_id,
-        text=text + "\n\nДобавить ещё позицию или перейти к фото?",
-        button_texts=["Добавить позицию", "Готово", "Назад", "Выход"],
-        button_payloads=["move_add", "move_done", "move_back", "move_exit"],
+        text="Требуются еще колеса:",
+        button_texts=["Да", "Нет", "Назад", "Выход"],
+        button_payloads=["Да", "Нет", "move_back", "move_exit"],
     )
     msg_id = extract_message_id(response)
     if msg_id:
         flow.data["prompt_msg_id"] = msg_id
+
+
+async def _send_review_prompt(flow: MoveFlow, chat_id: int) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    text = get_report_move_str(flow) or "(пока пусто)"
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text=text,
+        button_texts=["Заполнено корректно", "Исправить", "Назад", "Выход"],
+        button_payloads=["move_ok", "move_fix", "move_back", "move_exit"],
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
+async def _send_delete_prompt(flow: MoveFlow, chat_id: int) -> None:
+    prev_msg_id = flow.data.get("prompt_msg_id")
+    if prev_msg_id:
+        await delete_message(chat_id, prev_msg_id)
+
+    lines = get_report_move_list(flow)
+    response = await send_text_with_reply_buttons(
+        chat_id=chat_id,
+        text="Удалить:",
+        button_texts=lines + ["Завершить", "Добавить запись", "Выход"],
+        button_payloads=lines + ["move_delete_done", "move_add", "move_exit"],
+    )
+    msg_id = extract_message_id(response)
+    if msg_id:
+        flow.data["prompt_msg_id"] = msg_id
+
+
+async def _ask_pickup_type(flow: MoveFlow, chat_id: int) -> None:
+    await _ask(flow, chat_id, "Выберите вариант из предложенных:", _KEY_WHEEL_TYPE)
+
+
+async def _ask_pickup_option(flow: MoveFlow, chat_id: int, wheel_type: str) -> bool:
+    if not callable(load_xab_cache) or not callable(get_xab_koles):
+        await send_text(chat_id, "Не найдены функции Хаба load_xab_cache/get_xab_koles. Проверьте import в move.py")
+        return False
+
+    company = str(flow.data.get("company") or "")
+    try:
+        await asyncio.to_thread(load_xab_cache)
+        options = await asyncio.to_thread(get_xab_koles, company, wheel_type, flow.data.get("user_id"))
+    except Exception:
+        logger.exception("failed to load xab options")
+        await send_text(chat_id, "❌ Не удалось обновить остатки Хаба из Google Таблицы. Повторите попытку позже.")
+        return False
+
+    if not options:
+        flow.step = "pickup_type"
+        await _ask(flow, chat_id, "В хабе нет выбранного варианта, выберете другой вариант:", _KEY_WHEEL_TYPE)
+        return True
+
+    flow.data["pickup_type"] = wheel_type
+    flow.data["pickup_options"] = options
+    flow.step = "pickup_option"
+    await _ask(flow, chat_id, "Выберите вариант из предложенных:", options)
+    return True
+
+
+def _append_pickup_item_from_option(flow: MoveFlow, option_text: str) -> None:
+    temp = split_entry(option_text)
+    wheel_type = str(flow.data.get("pickup_type") or "")
+    count_left, count_right = _pickup_counts_by_type(wheel_type)
+    flow.items.append(
+        MoveItem(
+            marka_ts=temp[0].strip(),
+            radius=temp[1].strip(),
+            razmer=temp[2].strip(),
+            marka_rez=temp[3].strip(),
+            model_rez=temp[4].strip(),
+            sezon=temp[5].strip(),
+            tip_diska=temp[6].strip(),
+            wheel_type=wheel_type,
+            count_left=count_left,
+            count_right=count_right,
+        )
+    )
+
+
+async def cmd_move(st: MoveState, user_id: int, chat_id: int, username: str, msg: dict) -> None:
+    if chat_id < 0:
+        await send_text(chat_id, "Эта команда доступна только в личных сообщениях с ботом")
+        return
+
+    fio = await get_fio_async(max_chat_id=chat_id, user_id=user_id, msg=msg)
+    cleanup_stale_move_cache_users()
+    grz_options: list[str] = []
+    try:
+        grz_options = await asyncio.to_thread(acquire_move_cache, user_id)
+    except Exception:
+        logger.exception("failed to load move cache with tech plates")
+
+    st.flows_by_user[user_id] = MoveFlow(
+        step="grz_tech",
+        data={
+            "username": username,
+            "fio": fio,
+            "tech_grz_options": grz_options,
+            "user_id": user_id,
+        },
+    )
+    await _ask_tech_grz(st.flows_by_user[user_id], chat_id, "ГРЗ технички (можно ввести вручную):", include_back=False)
 
 
 async def _finish_flow(st: MoveState, user_id: int, chat_id: int, flow: MoveFlow) -> None:
@@ -474,7 +622,7 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "grz_tech":
         plate = text.strip().upper()
-        if not _is_plate_format(plate):
+        if not (_tech_plate_is_known(flow, plate) or _is_plate_format(plate)):
             await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
             return True
         flow.data["grz_tech"] = plate
@@ -491,9 +639,9 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         flow.data["action"] = action
         if flow.data["action"] == "Передаете в техничку":
             flow.step = "grz_peredacha"
-            await _ask_tech_grz(flow, chat_id, "Кому передаете (ГРЗ технички, можно ввести вручную):")
+            await _ask_tech_grz(flow, chat_id, "Кому передаете:")
             return True
-        flow.data["grz_peredacha"] = "-"
+        flow.data["grz_peredacha"] = ""
         flow.step = "company"
         await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
         return True
@@ -504,7 +652,7 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             await _ask(flow, chat_id, "Действие:", _KEY_ACTION, include_back=False)
             return True
         plate = text.strip().upper()
-        if not _is_plate_format(plate):
+        if not (_tech_plate_is_known(flow, plate) or _is_plate_format(plate)):
             await send_text(chat_id, "Проверьте формат ГРЗ (например А123БВ77)")
             return True
         flow.data["grz_peredacha"] = plate
@@ -514,8 +662,12 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
 
     if flow.step == "company":
         if ctrl == "back":
-            flow.step = "action"
-            await _ask(flow, chat_id, "Действие:", _KEY_ACTION, include_back=False)
+            if flow.data.get("action") == "Передаете в техничку":
+                flow.step = "grz_peredacha"
+                await _ask_tech_grz(flow, chat_id, "Кому передаете:")
+            else:
+                flow.step = "action"
+                await _ask(flow, chat_id, "Действие:", _KEY_ACTION, include_back=False)
             return True
         if text.strip() not in _KEY_COMPANY:
             await _ask(flow, chat_id, "Выберите компанию из списка:", _KEY_COMPANY)
@@ -523,95 +675,145 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
         flow.data["company"] = text.strip()
         flow.data["item_draft"] = MoveItem()
         if _is_pickup_from_stock(flow):
-            flow.step = "item_wheel_type"
-            await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+            flow.step = "pickup_type"
+            await _ask_pickup_type(flow, chat_id)
             return True
         flow.step = "item_marka_ts"
         await _send_plain(flow, chat_id, "Марка автомобиля:")
+        return True
+
+    if flow.step == "pickup_type":
+        if ctrl == "back":
+            flow.step = "company"
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            return True
+        wheel_type = _normalize_wheel_type(text)
+        if wheel_type not in {"Комплект", "Ось", "Правое", "Левое"}:
+            await _ask_pickup_type(flow, chat_id)
+            return True
+        ok = await _ask_pickup_option(flow, chat_id, wheel_type)
+        if not ok:
+            return True
+        return True
+
+    if flow.step == "pickup_option":
+        if ctrl == "back":
+            flow.step = "pickup_type"
+            await _ask_pickup_type(flow, chat_id)
+            return True
+        options = flow.data.get("pickup_options") or []
+        value = text.strip()
+        if value not in options:
+            await _ask(flow, chat_id, "Выберите вариант из предложенных:", options)
+            return True
+        _append_pickup_item_from_option(flow, value)
+        flow.data.pop("pickup_options", None)
+        flow.step = "need_more"
+        await _send_need_more_prompt(flow, chat_id)
         return True
 
     draft: MoveItem = flow.data.get("item_draft") or MoveItem()
 
     if flow.step == "item_marka_ts":
         if ctrl == "back":
-            if _is_pickup_from_stock(flow):
-                flow.step = "item_wheel_type"
-                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
-            else:
-                flow.step = "company"
-                await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
+            flow.step = "company"
+            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
             return True
         draft.marka_ts = text.strip()
         flow.data["item_draft"] = draft
         flow.step = "item_radius"
-        await _send_plain(flow, chat_id, "Радиус (пример R17):")
-        return True
-
-    if flow.step == "item_wheel_type":
-        if ctrl == "back":
-            flow.step = "company"
-            await _ask(flow, chat_id, "Компания:", _KEY_COMPANY)
-            return True
-        if text.strip() not in _KEY_WHEEL_TYPE:
-            await _ask(flow, chat_id, "Выберите тип позиции из списка:", _KEY_WHEEL_TYPE)
-            return True
-        draft.wheel_type = text.strip()
-        flow.data["item_draft"] = draft
-        flow.step = "item_marka_ts"
-        await _send_plain(flow, chat_id, "Марка автомобиля:")
+        await _send_plain(flow, chat_id, "Радиус:")
         return True
 
     if flow.step == "item_radius":
+        if ctrl == "back":
+            flow.step = "item_marka_ts"
+            await _send_plain(flow, chat_id, "Марка автомобиля:")
+            return True
         draft.radius = text.strip().upper()
+        flow.data["item_draft"] = draft
         flow.step = "item_razmer"
-        await _send_plain(flow, chat_id, "Размер (пример 225/65):")
+        await _send_plain(flow, chat_id, "Размер:")
         return True
 
     if flow.step == "item_razmer":
+        if ctrl == "back":
+            flow.step = "item_radius"
+            await _send_plain(flow, chat_id, "Радиус:")
+            return True
         draft.razmer = text.strip()
+        flow.data["item_draft"] = draft
         flow.step = "item_marka_rez"
-        await _send_plain(flow, chat_id, "Марка резины:")
+        await _send_plain(flow, chat_id, "Марка:")
         return True
 
     if flow.step == "item_marka_rez":
+        if ctrl == "back":
+            flow.step = "item_razmer"
+            await _send_plain(flow, chat_id, "Размер:")
+            return True
         draft.marka_rez = text.strip()
+        flow.data["item_draft"] = draft
         flow.step = "item_model_rez"
-        await _send_plain(flow, chat_id, "Модель резины:")
+        await _send_plain(flow, chat_id, "Модель:")
         return True
 
     if flow.step == "item_model_rez":
+        if ctrl == "back":
+            flow.step = "item_marka_rez"
+            await _send_plain(flow, chat_id, "Марка:")
+            return True
         draft.model_rez = text.strip()
+        flow.data["item_draft"] = draft
         flow.step = "item_sezon"
         await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
         return True
 
     if flow.step == "item_sezon":
+        if ctrl == "back":
+            flow.step = "item_model_rez"
+            await _send_plain(flow, chat_id, "Модель:")
+            return True
+        if text.strip() not in _KEY_SEASON:
+            await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
+            return True
         draft.sezon = text.strip()
+        flow.data["item_draft"] = draft
         flow.step = "item_tip_diska"
         await _send_plain(flow, chat_id, "Тип диска:")
         return True
 
     if flow.step == "item_tip_diska":
-        draft.tip_diska = text.strip()
-        if draft.wheel_type:
-            flow.step = "item_count_left"
-            await _send_plain(flow, chat_id, "Сколько левых колес:")
+        if ctrl == "back":
+            flow.step = "item_sezon"
+            await _ask(flow, chat_id, "Сезон:", _KEY_SEASON)
             return True
-        flow.step = "item_wheel_type"
-        await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+        draft.tip_diska = text.strip()
+        flow.data["item_draft"] = draft
+        flow.step = "item_count_left"
+        await _send_plain(flow, chat_id, "Сколько левых колес:")
         return True
 
     if flow.step == "item_count_left":
+        if ctrl == "back":
+            flow.step = "item_tip_diska"
+            await _send_plain(flow, chat_id, "Тип диска:")
+            return True
         try:
             draft.count_left = int(text.strip())
         except Exception:
             await send_text(chat_id, "Введите целое число")
             return True
+        flow.data["item_draft"] = draft
         flow.step = "item_count_right"
         await _send_plain(flow, chat_id, "Сколько правых колес:")
         return True
 
     if flow.step == "item_count_right":
+        if ctrl == "back":
+            flow.step = "item_count_left"
+            await _send_plain(flow, chat_id, "Сколько левых колес:")
+            return True
         try:
             draft.count_right = int(text.strip())
         except Exception:
@@ -619,45 +821,89 @@ async def try_handle_move_step(st: MoveState, user_id: int, chat_id: int, text: 
             return True
         flow.items.append(draft)
         flow.data["item_draft"] = MoveItem()
-        flow.step = "items_review"
-        await _send_items_prompt(flow, chat_id)
+        flow.step = "need_more"
+        await _send_need_more_prompt(flow, chat_id)
         return True
 
-    if flow.step == "items_review":
-        if ctrl == "add":
+    if flow.step == "need_more":
+        if ctrl == "back":
+            if flow.items:
+                flow.items.pop()
+            if _is_pickup_from_stock(flow):
+                flow.step = "pickup_type"
+                await _ask_pickup_type(flow, chat_id)
+            else:
+                flow.data["item_draft"] = MoveItem()
+                flow.step = "item_count_left"
+                await _send_plain(flow, chat_id, "Сколько левых колес:")
+            return True
+        if text.strip() == "Да":
             flow.data["item_draft"] = MoveItem()
             if _is_pickup_from_stock(flow):
-                flow.step = "item_wheel_type"
-                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
+                flow.step = "pickup_type"
+                await _ask_pickup_type(flow, chat_id)
             else:
                 flow.step = "item_marka_ts"
                 await _send_plain(flow, chat_id, "Марка автомобиля:")
             return True
-        if ctrl == "done":
+        if text.strip() == "Нет":
+            if not flow.items:
+                await send_text(chat_id, "Добавьте хотя бы одну позицию")
+                return True
+            flow.step = "review"
+            await _send_review_prompt(flow, chat_id)
+            return True
+        await _send_need_more_prompt(flow, chat_id)
+        return True
+
+    if flow.step == "review":
+        if ctrl == "back":
+            flow.step = "need_more"
+            await _send_need_more_prompt(flow, chat_id)
+            return True
+        if ctrl == "ok":
+            flow.step = "files"
+            await _send_files_prompt(flow, chat_id, "Прикрепите от 2 до 10 фото")
+            return True
+        if ctrl == "fix":
+            flow.step = "delete_item"
+            await _send_delete_prompt(flow, chat_id)
+            return True
+        await _send_review_prompt(flow, chat_id)
+        return True
+
+    if flow.step == "delete_item":
+        if ctrl == "add":
+            flow.data["item_draft"] = MoveItem()
+            if _is_pickup_from_stock(flow):
+                flow.step = "pickup_type"
+                await _ask_pickup_type(flow, chat_id)
+            else:
+                flow.step = "item_marka_ts"
+                await _send_plain(flow, chat_id, "Марка автомобиля:")
+            return True
+        if ctrl == "delete_done":
             if not flow.items:
                 await send_text(chat_id, "Добавьте хотя бы одну позицию")
                 return True
             flow.step = "files"
             await _send_files_prompt(flow, chat_id, "Прикрепите от 2 до 10 фото")
             return True
-        if ctrl == "back":
-            if flow.items:
-                flow.items.pop()
-            flow.data["item_draft"] = MoveItem()
-            if _is_pickup_from_stock(flow):
-                flow.step = "item_wheel_type"
-                await _ask(flow, chat_id, "Тип позиции:", _KEY_WHEEL_TYPE)
-            else:
-                flow.step = "item_marka_ts"
-                await _send_plain(flow, chat_id, "Марка автомобиля:")
+        lines = get_report_move_list(flow)
+        value = text.strip()
+        try:
+            idx = lines.index(value)
+        except ValueError:
+            await _send_delete_prompt(flow, chat_id)
             return True
-        await _send_items_prompt(flow, chat_id)
+        flow.items.pop(idx)
+        await _send_delete_prompt(flow, chat_id)
         return True
 
     if flow.step == "files":
         if ctrl == "back":
-            flow.step = "items_review"
-            await _send_items_prompt(flow, chat_id)
+            flow.step = "review"
+            await _send_review_prompt(flow, chat_id)
             return True
         if ctrl == "done":
             if len(flow.files) < 2:
