@@ -1,0 +1,19 @@
+from typing import List, Dict
+# Рабочий вариант
+CHAT_ID_WASH_MSK = -1002615905328
+CHAT_ID_WASH_SPB = -1002615905328
+THREAD_ID_WASH_MSK = 397
+THREAD_ID_WASH_SPB = 396
+
+# Тестовый вариант
+# CHAT_ID_WASH_MSK = -1002371648868
+# CHAT_ID_WASH_SPB = -1002371648868
+# THREAD_ID_WASH_MSK = 2555
+# THREAD_ID_WASH_SPB = 2555
+
+LOGS_DIR = "logs"
+
+URL_GOOGLE_SHEETS_EXTRA_WASH = "https://docs.google.com/spreadsheets/d/1SZigA7frxmDnE_mT8fZAtwjiQyPyHsuBglVLLiNLiQQ/edit?gid=1540730277#gid=1540730277"
+
+EXTRA_WASH_ADDRESSES_BY_CITY: Dict[str, List[str]] = {}
+EXTRA_WASH_SERVICES_BY_CITY: Dict[str, List[str]] = {}
