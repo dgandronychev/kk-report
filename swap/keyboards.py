@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from typing import List, Tuple, Set
+from app.config import PAGE_SIZE
 
 def inline_kb_yes_no_exit(exit_callback: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -30,105 +30,60 @@ def build_transfer_fix_keyboard(transfer_items: list) -> InlineKeyboardMarkup:
     )
     return kb
 
-def build_dates_kb(dates: list[str], selected: set[str]) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup(row_width=1)
-    for idx, d in enumerate(dates):
-        prefix = "✅ " if d in selected else ""
-        kb.add(InlineKeyboardButton(prefix + d, callback_data=f"select_date:{idx}"))
-    kb.add(InlineKeyboardButton("Готово", callback_data="exit"))
-    return kb
-
-def build_locations_kb(locations: list[str], selected: set[str]) -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup(row_width=1)
-    for idx, loc in enumerate(locations):
-        prefix = "✅ " if loc in selected else ""
-        kb.add(InlineKeyboardButton(prefix + loc, callback_data=f"select_loc:{idx}"))
-    kb.add(InlineKeyboardButton("Готово", callback_data="exit_loc"))
-    return kb
-
-def build_confirmation_kb() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardMarkup(row_width=1)
-    kb.add(
-        InlineKeyboardButton("✅ Всё верно", callback_data="confirm:yes"),
-        InlineKeyboardButton("✏️ Изменить даты", callback_data="confirm:dates"),
-        InlineKeyboardButton("✏️ Изменить локации", callback_data="confirm:locs"),
-    )
-    kb.add(InlineKeyboardButton("❌ Выход", callback_data="exit"))
-    return kb
-
-def build_cancellation_kb(
-    shifts: List[Tuple[str, str]],
-    selected: Set[int]
+def inline_kb_paginated(
+    options: list[str],
+    base_callback: str,
+    cb_prev: str,
+    cb_next: str,
+    cb_item: str,
+    cb_exit: str,
+    page: int = 0
 ) -> InlineKeyboardMarkup:
-    """
-    shifts — список (дата, локация)
-    selected — множество индексов уже отмеченных на отмену
-    по умолчанию все показываем с зелёной галочкой,
-    при выборе меняем на ❌
-    """
     kb = InlineKeyboardMarkup(row_width=1)
-    for idx, (d, loc) in enumerate(shifts):
-        prefix = "❌ " if idx in selected else "✅ "
-        text = f"{prefix}{d} — {loc}"
+    total_items = len(options)
+    total_pages = (total_items + PAGE_SIZE - 1) // PAGE_SIZE
+    start = page * PAGE_SIZE
+    end = min(start + PAGE_SIZE, total_items)
+    slice_options = options[start:end]
+
+    for idx_on_page, opt in enumerate(slice_options):
         kb.add(
             InlineKeyboardButton(
-                text,
-                callback_data=f"select_shift:{idx}"
+                text=opt,
+                callback_data=f"{cb_item}:{page}:{idx_on_page}"
             )
         )
-    # кнопка подтверждения отмены
-    kb.add(
-        InlineKeyboardButton(
-            "Отменить смену",
-            callback_data="exit_cancel"
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="⬅️ Назад",
+                callback_data=f"{cb_prev}:{page - 1}"
+            )
         )
-    )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text="Вперед ➡️",
+                callback_data=f"{cb_next}:{page + 1}"
+            )
+        )
+    if nav_buttons:
+        kb.row(*nav_buttons)
+
+    kb.add(InlineKeyboardButton(text="Выход", callback_data=cb_exit))
     return kb
 
-
-def build_confirm_cancel_kb() -> InlineKeyboardMarkup:
-    """
-    Клавиатура с финальным Да/Нет для подтверждения отмены.
-    """
-    kb = InlineKeyboardMarkup(row_width=2)
+def build_arrival_fix_keyboard(arrival_items: list[dict]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    for idx, it in enumerate(arrival_items):
+        # показываем имя, ячейку и количество
+        text = f"{it['name']} 🗂 {it.get('cell','')} ({it['quantity']})"
+        kb.insert(InlineKeyboardButton(text=text, callback_data=f"arrival_delete:{idx}"))
+    # добавляем действия
     kb.add(
-        InlineKeyboardButton("Да, отменить", callback_data="confirm:yes"),
-        InlineKeyboardButton("Нет",         callback_data="confirm:no"),
-    )
-    return kb
-
-def inline_kb_list(options: list[str], base_callback: str, cb_back: str, cb_exit: str) -> InlineKeyboardMarkup:
-    """
-    Пример клавиатуры для списка вариантов + «Назад», «Выход».
-    Каждая опция порождает callback_data= base_callback + <индекс>
-    """
-    kb = InlineKeyboardMarkup(row_width=2)
-    for idx, opt in enumerate(options):
-        kb.add(InlineKeyboardButton(opt, callback_data=f"{base_callback}{idx}"))
-    kb.add(
-        InlineKeyboardButton("Назад", callback_data=cb_back),
-        InlineKeyboardButton("Выход", callback_data=cb_exit)
-    )
-    return kb
-
-def inline_kb_back_exit(cb_back: str, cb_exit: str) -> InlineKeyboardMarkup:
-    """
-    Пример клавиатуры «Назад / Выход»
-    """
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Назад", callback_data=cb_back),
-        InlineKeyboardButton("Выход", callback_data=cb_exit)
-    )
-    return kb
-
-def inline_kb_done_back(done_callback: str, back_callback: str) -> InlineKeyboardMarkup:
-    """
-    Клавиатура с кнопками "Готово" и "Назад".
-    """
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("Готово", callback_data=done_callback),
-        InlineKeyboardButton("Назад", callback_data=back_callback)
+        InlineKeyboardButton(text="Добавить", callback_data="arrival_fix:add"),
+        InlineKeyboardButton(text="Завершить отчет", callback_data="arrival_fix:finish")
     )
     return kb

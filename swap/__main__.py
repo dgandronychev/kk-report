@@ -1,12 +1,11 @@
-# __main__.py
-
 import asyncio
 import logging
 from pathlib import Path
 from datetime import datetime
-from app.bot import dp
+
+from app.bot import dp, on_startup
 from app.config import LOGS_DIR
-from app.utils.gsheets import load_extra_wash_locations
+from app.utils.gsheets import load_data_rez_disk
 
 async def main():
     # Настраиваем логирование в файл
@@ -21,8 +20,9 @@ async def main():
     logger.setLevel(logging.INFO)
     logger.addHandler(file_handler)
 
-    load_extra_wash_locations()
+    load_data_rez_disk()
 
+    # Запускаем поллинг
     await dp.start_polling()
 
 if __name__ == "__main__":
