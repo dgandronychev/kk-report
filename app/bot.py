@@ -54,6 +54,14 @@ from app.handlers.move import (
     cleanup_stale_move_cache_users,
     get_move_cache_user_ids,
 )
+from app.handlers.warehouse import (
+    WarehouseState,
+    cmd_arrival_tmc,
+    cmd_transfer_tmc,
+    cmd_order_wheels,
+    cmd_request_tmc,
+    cmd_update_orders_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +77,11 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("Заправка", "/zapravka"),
     ("Расход", "/expense"),
     ("Отчет по расходу", "/report_expense"),
+    ("Поступление ТМЦ", "/arrival_tmc"),
+    ("Выдача ТМЦ", "/transfer_tmc"),
+    ("Заказ резины/дисков", "/order_wheels"),
+    ("Заявка на выдачу ТМЦ", "/request_tmc"),
+    ("Обновить базу заказов", "/update_orders_db"),
     ("Начало смены", "/start_job_shift"),
     ("Конец смены", "/end_work_shift"),
     ("Регистрация", "/registration"),
@@ -120,6 +133,7 @@ _open_gate = OpenGateState()
 _finance = FinanceState()
 _report_expense = ReportExpenseState()
 _move = MoveState()
+_warehouse = WarehouseState()
 _menu_prompt_message_ids: dict[int, str] = {}
 
 # ===== MAX update parsing helpers =====
@@ -428,6 +442,19 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         "report_expense": "/report_expense",
         "move": "/move",
         "перемещение": "/move",
+        "arrival_tmc": "/arrival_tmc",
+        "поступление_тмц": "/arrival_tmc",
+        "поступление": "/arrival_tmc",
+        "transfer_tmc": "/transfer_tmc",
+        "выдача_тмц": "/transfer_tmc",
+        "выдача": "/transfer_tmc",
+        "order_wheels": "/order_wheels",
+        "заказ_резины/дисков": "/order_wheels",
+        "заказ_резины_дисков": "/order_wheels",
+        "request_tmc": "/request_tmc",
+        "заявка_на_выдачу_тмц": "/request_tmc",
+        "update_orders_db": "/update_orders_db",
+        "обновить_базу_заказов": "/update_orders_db",
         "update_data": "/update_data",
         "обновить данные": "/update_data",
         "reset_move_cache": "/reset_move_cache",
@@ -542,6 +569,22 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         username = str(sender.get("username") or sender.get("first_name") or user_id)
         await cmd_nomenclature(_nomenclature, user_id, chat_id, username)
         return
+    if t == "/request_tmc":
+        await cmd_request_tmc(_warehouse, user_id, chat_id)
+        return
+    if t == "/arrival_tmc":
+        await cmd_arrival_tmc(_warehouse, user_id, chat_id)
+        return
+    if t == "/transfer_tmc":
+        await cmd_transfer_tmc(_warehouse, user_id, chat_id)
+        return
+    if t == "/order_wheels":
+        await cmd_order_wheels(_warehouse, user_id, chat_id)
+        return
+    if t == "/update_orders_db":
+        await cmd_update_orders_db(chat_id)
+        return
+
     if t == "/update_data":
         if UPDATE_DATA_ALLOWED_USER_IDS and user_id not in UPDATE_DATA_ALLOWED_USER_IDS:
             await send_text(chat_id, "У вас нет прав для вызова данной команды")

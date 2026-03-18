@@ -1089,3 +1089,198 @@ def update_xab_koles_bulk(company: str, items: list[Any], username: str, grz_tec
     except Exception as e:
         logger.exception("Ошибка в update_xab_koles_bulk: %s", e)
         return 0
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any, Iterable, Optional
+
+import gspread
+from gspread.models import Spreadsheet, Worksheet
+
+from swap.config import URL_GOOGLE_SHEETS_LOC_SHM, URL_GOOGLE_SHEETS_ORDER, URL_GOOGLE_SHEETS_SKLAD
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class WarehouseRequestRow:
+    row_index: int
+    request_number: str
+    material_name: str
+    quantity: int
+    status: str
+
+
+def _gc() -> gspread.Client:
+    return gspread.service_account("app/creds.json")
+
+
+def _open(url: str) -> Spreadsheet:
+    return _gc().open_by_url(url)
+
+
+def _worksheet(url: str, title: str) -> Worksheet:
+    return _open(url).worksheet(title)
+
+
+
+def get_sheet_header_map(ws: Worksheet) -> dict[str, int]:
+    header = ws.row_values(1)
+    return {str(name).strip(): idx + 1 for idx, name in enumerate(header) if str(name).strip()}
+
+
+
+def find_request_rows(request_number: str) -> list[WarehouseRequestRow]:
+    ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Реестр заказ ТМЦ")
+    data = ws.get_all_values()
+    if not data:
+        return []
+    header = data[0]
+    idx_num = header.index("Номер заявки")
+    idx_name = header.index("Вид ТМЦ")
+    idx_qty = header.index("Кол-во")
+    idx_status = header.index("Статус")
+    rows: list[WarehouseRequestRow] = []
+    for row_index, row in enumerate(data[1:], start=2):
+        if len(row) <= max(idx_num, idx_name, idx_qty, idx_status):
+            continue
+        if str(row[idx_num]).strip() != str(request_number).strip():
+            continue
+        rows.append(
+            WarehouseRequestRow(
+                row_index=row_index,
+                request_number=str(row[idx_num]).strip(),
+                material_name=str(row[idx_name]).strip(),
+                quantity=int(str(row[idx_qty]).strip() or "0"),
+                status=str(row[idx_status]).strip(),
+            )
+        )
+    return rows
+
+
+
+def append_report_link_by_request(request_number: str, report_link: str) -> int:
+    ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Реестр заказ ТМЦ")
+    col_map = get_sheet_header_map(ws)
+    col_link = col_map.get("Ссылка на отчет")
+    if not col_link:
+        raise RuntimeError("В листе 'Реестр заказ ТМЦ' нет колонки 'Ссылка на отчет'")
+    rows = find_request_rows(request_number)
+    if not rows:
+        return 0
+    cells = [gspread.Cell(row=r.row_index, col=col_link, value=report_link) for r in rows]
+    ws.update_cells(cells, value_input_option="USER_ENTERED")
+    return len(cells)
+
+
+
+def get_material_total_quantity_map() -> dict[str, int]:
+    ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Склад")
+    data = ws.get_all_values()
+    if not data:
+        return {}
+    header = data[0]
+    idx_name = header.index("Наименование")
+    idx_qty = header.index("Количество")
+    totals: dict[str, int] = {}
+    for row in data[1:]:
+        if len(row) <= max(idx_name, idx_qty):
+            continue
+        name = str(row[idx_name]).strip()
+        if not name:
+            continue
+        qty = int(str(row[idx_qty]).strip() or "0")
+        totals[name] = totals.get(name, 0) + qty
+    return totals
+
+
+
+def get_material_cells_with_row_indexes(material_name: str) -> list[dict[str, Any]]:
+    ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Склад")
+    data = ws.get_all_values()
+    if not data:
+        return []
+    header = data[0]
+    idx_name = header.index("Наименование")
+    idx_qty = header.index("Количество")
+    idx_cell = header.index("Ячейка")
+    rows: list[dict[str, Any]] = []
+    for row_index, row in enumerate(data[1:], start=2):
+        if len(row) <= max(idx_name, idx_qty, idx_cell):
+            continue
+        if str(row[idx_name]).strip() != str(material_name).strip():
+            continue
+        rows.append(
+            {
+                "row_index": row_index,
+                "name": str(row[idx_name]).strip(),
+                "quantity": int(str(row[idx_qty]).strip() or "0"),
+                "cell": str(row[idx_cell]).strip(),
+            }
+        )
+    return rows
+
+
+
+def close_empty_cell_after_transfer(material_name: str, cell_name: str) -> bool:
+    sklad_ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Склад")
+    free_ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Справочник ячеек")
+    rows = get_material_cells_with_row_indexes(material_name)
+    target = next((r for r in rows if r["cell"] == cell_name), None)
+    if not target or target["quantity"] != 0:
+        return False
+    col_map = get_sheet_header_map(sklad_ws)
+    qty_col = col_map.get("Количество")
+    if not qty_col:
+        raise RuntimeError("В листе 'Склад' нет колонки 'Количество'")
+    sklad_ws.update_cell(target["row_index"], qty_col, "")
+    free_ws.append_row([cell_name], value_input_option="USER_ENTERED")
+    return True
+
+
+
+def reserve_free_cell(cell_name: str) -> bool:
+    ws = _worksheet(URL_GOOGLE_SHEETS_SKLAD, "Справочник ячеек")
+    values = ws.get_all_values()
+    for row_index, row in enumerate(values[1:], start=2):
+        if row and str(row[0]).strip() == str(cell_name).strip():
+            ws.delete_rows(row_index)
+            return True
+    return False
+
+
+
+def get_shm_locations_by_company_normalized(company_ui: str) -> list[str]:
+    mapping = {"СитиДрайв": "СИТИ", "Ситидрайв": "СИТИ", "Яндекс": "ЯНДЕКС", "Белка": "БЕЛКА"}
+    key = mapping.get(company_ui)
+    if not key:
+        return []
+    ws = _worksheet(URL_GOOGLE_SHEETS_LOC_SHM, "Локации СШМ")
+    data = ws.get_all_values()
+    if not data:
+        return []
+    header = data[0]
+    idx_addr = header.index("Адрес")
+    idx_company = header.index("Каршеринг")
+    out: set[str] = set()
+    for row in data[1:]:
+        if len(row) <= max(idx_addr, idx_company):
+            continue
+        if str(row[idx_company]).strip().upper() == key:
+            addr = str(row[idx_addr]).strip()
+            if addr:
+                out.add(addr)
+    return sorted(out, key=lambda s: s.lower())
+
+
+
+def get_order_catalog_snapshot() -> dict[str, list[dict[str, Any]]]:
+    sh = _open(URL_GOOGLE_SHEETS_ORDER)
+    return {
+        "city_disk": sh.worksheet("Сити Диски сити new").get_all_records(),
+        "yandex_disk": sh.worksheet("ЯД Диски").get_all_records(),
+        "city_tire": sh.worksheet("СИТИ Лето РФ new").get_all_records(),
+        "yandex_tire": sh.worksheet("ЯД Лето РФ new").get_all_records(),
+    }
