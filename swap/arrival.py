@@ -9,7 +9,7 @@ from typing import Union
 from app.utils.script import resolve_event
 #
 
-from app.config import TOKEN_BOT, CHAT_ID_ARRIVAL, THREAD_MESSAGE_ID, PAGE_SIZE
+from app.config import TOKEN_BOT, TELEGRAM_CHAT_ID_ARRIVAL, TELEGRAM_THREAD_MESSAGE_ID, PAGE_SIZE
 from app.keyboards import (
     inline_kb_paginated,
     inline_kb_yes_no_exit,
@@ -420,13 +420,13 @@ async def arrival_done_photos(callback: types.CallbackQuery, state: FSMContext):
     user = callback.from_user
     caption += f"@{user.username}" if user.username else user.first_name
     if len(photos) == 1:
-        sent = await bot.send_photo(CHAT_ID_ARRIVAL, message_thread_id=THREAD_MESSAGE_ID, photo=photos[0], caption=caption)
+        sent = await bot.send_photo(TELEGRAM_CHAT_ID_ARRIVAL, message_thread_id=TELEGRAM_THREAD_MESSAGE_ID, photo=photos[0], caption=caption)
     else:
         media = [InputMediaPhoto(media=photos[0], caption=caption)]
         for p in photos[1:]: media.append(InputMediaPhoto(media=p))
-        msgs = await bot.send_media_group(CHAT_ID_ARRIVAL, media=media, message_thread_id=THREAD_MESSAGE_ID)
+        msgs = await bot.send_media_group(TELEGRAM_CHAT_ID_ARRIVAL, media=media, message_thread_id=TELEGRAM_THREAD_MESSAGE_ID)
         sent = msgs[0] if msgs else None
-    link = f"https://t.me/c/{str(CHAT_ID_ARRIVAL)[4:]}/{sent.message_id}" if sent else ""
+    link = f"https://t.me/c/{str(TELEGRAM_CHAT_ID_ARRIVAL)[4:]}/{sent.message_id}" if sent else ""
     await bot.send_message(callback.from_user.id, "Данные успешно отправлены")
     await callback.message.delete()
     # write and remove free cells

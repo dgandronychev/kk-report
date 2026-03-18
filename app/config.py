@@ -29,6 +29,9 @@ GOOGLE_SHEETS_SHIFT = "https://docs.google.com/spreadsheets/d/1lXmm7IzvT6oBhGf62
 GSPREAD_URL_INFO_FINANCE = "https://docs.google.com/spreadsheets/d/1EkakbixukbAI56XqvQfB-NQ-sQjmhb5Lr1McHfQ3BYg/edit?gid=0#gid=0"
 GSPREAD_URL_INFO_RASXOD = "https://docs.google.com/spreadsheets/d/1iH5IeurStoNQB9FKwdxehTF5hB_1QcX9LFYjpVqsxvo/edit?pli=1&gid=0#gid=0"
 GSPREAD_URL_INFO_RASXOD_SHM = "https://docs.google.com/spreadsheets/d/14vrAidePmR78-l9R31tWOTxCADmqvseLIHhR7fY1kR4/edit?gid=729033122#gid=729033122"
+URL_GOOGLE_SHEETS_SKLAD = "https://docs.google.com/spreadsheets/d/1AXHC70D-KLaJTo56XN91oypsknL1jTUQh6Tl6Bawlrw/edit?gid=0"
+URL_GOOGLE_SHEETS_ORDER = "https://docs.google.com/spreadsheets/d/1A06mPQgZlPa6k7ZGZxM1mCkHUhBkx5xe15XE_9X0tEw/edit?gid=0#gid=0"
+URL_GOOGLE_SHEETS_LOC_SHM ="https://docs.google.com/spreadsheets/d/11KMV5u-toR8O1RdEuEHJTwNGKo2lS5BZQaU-TWqgYm4/edit?gid=0#gid=0"
 
 GOOGLE_DRIVE_CREDS_JSON = os.environ.get("GOOGLE_DRIVE_CREDS_JSON", "app/creds.json")
 GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID", "1EzE_RQBt8-tkbPstIll_KfdOUAwY3564")
@@ -52,6 +55,11 @@ def _parse_user_ids_csv(value: str) -> set[int]:
 
 NOMENCLATURE_ALLOWED_USER_IDS = _parse_user_ids_csv("199909595")
 UPDATE_DATA_ALLOWED_USER_IDS = _parse_user_ids_csv("199909595")
+
+BAZA_DISK_SITY: list[list[str]] = []
+BAZA_DISK_YNDX: list[list[str]] = []
+BAZA_REZN_SITY: list[list[str]] = []
+BAZA_REZN_YNDX: list[list[str]] = []
 
 # Telegram mirror destinations (aligned with legacy swap routing)
 #WORK
@@ -117,6 +125,11 @@ TELEGRAM_CHAT_ID_GATES = -1002526375559
 TELEGRAM_THREAD_ID_GATES_CITY = 250602
 TELEGRAM_THREAD_ID_GATES_YANDEX = 166590
 
+TELEGRAM_CHAT_ID_ARRIVAL = -1002348831384
+TELEGRAM_THREAD_MESSAGE_ID = 1236
+TELEGRAM_THREAD_MESSAGE_SKLAD_SITY = 60
+TELEGRAM_THREAD_MESSAGE_SKLAD_YNDX = 58
+
 #TEST
 # TELEGRAM_BOT_TOKEN_INCEDENT = "7413900981:AAHCsVFC2RMQmnboDs6qA5PiIkvMsxvhQoY"
 # TELEGRAM_BOT_TOKEN_TECHNIK = "7413900981:AAHCsVFC2RMQmnboDs6qA5PiIkvMsxvhQoY"
@@ -171,3 +184,8 @@ TELEGRAM_THREAD_ID_GATES_YANDEX = 166590
 # TELEGRAM_CHAT_ID_GATES = -1002371648868
 # TELEGRAM_THREAD_ID_GATES_CITY = 2555
 # TELEGRAM_THREAD_ID_GATES_YANDEX = 2555
+
+# TELEGRAM_CHAT_ID_ARRIVAL = -1002371648868
+# TELEGRAM_THREAD_MESSAGE_ID = 2555
+# TELEGRAM_THREAD_MESSAGE_SKLAD_SITY = 2555
+# TELEGRAM_THREAD_MESSAGE_SKLAD_YNDX = 2555

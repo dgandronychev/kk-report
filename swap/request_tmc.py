@@ -11,7 +11,7 @@ from aiogram.dispatcher import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.utils.script import resolve_event
-from app.config import TOKEN_BOT, CHAT_ID_ARRIVAL, THREAD_MESSAGE_ID, PAGE_SIZE, URL_TASK_FIO
+from app.config import TOKEN_BOT, TELEGRAM_CHAT_ID_ARRIVAL, TELEGRAM_THREAD_MESSAGE_ID, PAGE_SIZE, URL_TASK_FIO
 from app.keyboards import (
     inline_kb_paginated,
     inline_kb_yes_no_exit,
@@ -498,13 +498,13 @@ async def process_request_confirm(callback: types.CallbackQuery, state: FSMConte
 
         # 2) отправляем сообщение в чат склада
         sent = await bot.send_message(
-            CHAT_ID_ARRIVAL,
+            TELEGRAM_CHAT_ID_ARRIVAL,
             caption,
-            message_thread_id=THREAD_MESSAGE_ID,
+            message_thread_id=TELEGRAM_THREAD_MESSAGE_ID,
         )
 
         # 3) формируем ссылку на сообщение
-        cid_str = str(CHAT_ID_ARRIVAL)
+        cid_str = str(TELEGRAM_CHAT_ID_ARRIVAL)
         if cid_str.startswith("-100"):
             chat_link_id = cid_str[4:]
         else:

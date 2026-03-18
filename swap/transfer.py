@@ -17,8 +17,8 @@ from aiogram.types import (
 from app.utils.script import resolve_event
 from app.config import (
     TOKEN_BOT,
-    CHAT_ID_ARRIVAL,
-    THREAD_MESSAGE_ID,
+    TELEGRAM_CHAT_ID_ARRIVAL,
+    TELEGRAM_THREAD_MESSAGE_ID,
     PAGE_SIZE,
 )
 from app.states import TransferStates
@@ -1135,26 +1135,26 @@ async def transfer_done_photos(callback: types.CallbackQuery, state: FSMContext)
     # отправка в чат склада
     if len(photos) == 1:
         sent = await bot.send_photo(
-            CHAT_ID_ARRIVAL,
+            TELEGRAM_CHAT_ID_ARRIVAL,
             photo=photos[0],
             caption=caption,
-            message_thread_id=THREAD_MESSAGE_ID,
+            message_thread_id=TELEGRAM_THREAD_MESSAGE_ID,
         )
     else:
         media = [InputMediaPhoto(media=photos[0], caption=caption)]
         for pid in photos[1:]:
             media.append(InputMediaPhoto(media=pid))
         msgs = await bot.send_media_group(
-            CHAT_ID_ARRIVAL,
+            TELEGRAM_CHAT_ID_ARRIVAL,
             media=media,
-            message_thread_id=THREAD_MESSAGE_ID,
+            message_thread_id=TELEGRAM_THREAD_MESSAGE_ID,
         )
         sent = msgs[0] if msgs else None
 
     # формируем ссылку
     message_link = ""
     if sent:
-        cid_str = str(CHAT_ID_ARRIVAL)
+        cid_str = str(TELEGRAM_CHAT_ID_ARRIVAL)
         chat_link_id = cid_str[4:] if cid_str.startswith("-100") else cid_str
         message_link = f"https://t.me/c/{chat_link_id}/{sent.message_id}"
 

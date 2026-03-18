@@ -10,9 +10,9 @@ from app.utils.script import resolve_event
 
 from app.config import (
     TOKEN_BOT,
-    CHAT_ID_ARRIVAL,
-    THREAD_MESSAGE_SKLAD_SITY,
-    THREAD_MESSAGE_SKLAD_YNDX,
+    TELEGRAM_CHAT_ID_ARRIVAL,
+    TELEGRAM_THREAD_MESSAGE_SKLAD_SITY,
+    TELEGRAM_THREAD_MESSAGE_SKLAD_YNDX,
 )
 from app.utils.gsheets import load_data_rez_disk, write_row_to_sheet
 import app.config as cfg
@@ -227,8 +227,8 @@ async def finish_order(cb: types.CallbackQuery, state: FSMContext):
         f"— Количество: {data['quantity']}\n"
         f"Собрано: {'Да' if assembled=='yes' else 'Нет, нужна замена'}"
     )
-    thread_id = THREAD_MESSAGE_SKLAD_SITY if data['company'] =='city' else THREAD_MESSAGE_SKLAD_YNDX
-    await bot.send_message(chat_id=CHAT_ID_ARRIVAL, text=text, message_thread_id=thread_id)
+    thread_id = TELEGRAM_THREAD_MESSAGE_SKLAD_SITY if data['company'] =='city' else TELEGRAM_THREAD_MESSAGE_SKLAD_YNDX
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID_ARRIVAL, text=text, message_thread_id=thread_id)
     try:
         await cb.message.delete()
     except MessageToDeleteNotFound:

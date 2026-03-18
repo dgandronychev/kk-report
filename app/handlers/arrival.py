@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
 
-from max_warehouse_common import (
+from warehouse_common import (
     WarehouseFlow,
     WarehouseState,
     extract_photo_ids,
@@ -18,7 +17,7 @@ from max_warehouse_common import (
     send_prompt,
     sender_tag,
 )
-from swap.gsheets import (
+from app.utils.gsheets import (
     get_free_cells,
     get_material_cells,
     get_material_names,
@@ -27,6 +26,12 @@ from swap.gsheets import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def build_arrival_fix_options(items: list[dict[str, str]]) -> list[str]:
+    options = [f"❌ {it['name']} × {it['quantity']} | {it['cell']}" for it in items]
+    options.extend(["➕ Добавить позицию", "✅ Закончить"])
+    return options
 
 
 async def cmd_arrival_tmc(state: WarehouseState, user_id: int, chat_id: int) -> None:
@@ -43,35 +48,34 @@ async def _show_cells(flow: WarehouseFlow, chat_id: int, material: str) -> None:
     flow.data["current_cells"] = cells
     if cells:
         options = [f"{c.get('cell', '')} | {c.get('quantity', '')} шт" for c in cells if c.get("cell")]
-        if not options:
-            options = ["Ввести вручную"]
-            push_step(flow, "arrival_name_manual")
-            await send_prompt(flow, chat_id, "У выбранного ТМЦ нет валидных ячеек. Введите наименование заново.", options=["Ввести вручную"])
-            return
         push_step(flow, "arrival_cell_existing")
         await send_prompt(flow, chat_id, f"{material}: выберите ячейку хранения.", options)
         return
-
     free_cells = sorted(set(get_free_cells()), key=lambda s: s.lower())
     flow.data["current_free_cells"] = free_cells
     if free_cells:
         push_step(flow, "arrival_cell_free")
         await send_paginated_prompt(flow, chat_id, f"{material}: выберите свободную ячейку.", free_cells, page_key="free_page")
         return
-
     push_step(flow, "arrival_cell_manual")
     await send_info(chat_id, "Свободные ячейки не найдены. Введите ячейку вручную.")
 
 
 async def _show_summary(flow: WarehouseFlow, chat_id: int) -> None:
     items = flow.data.get("items") or []
-    lines = ["Проверьте поступление:", ""]
-    for idx, item in enumerate(items, start=1):
-        lines.append(f"{idx}. {item['name']} | {item['quantity']} шт | ячейка {item['cell']}")
-    lines.append("")
+    lines = ["Проверка данных:", ""]
+    for it in items:
+        lines.append(f"🔻 {it['name']} 🗂 {it['cell']}")
+        lines.append(f"Количество: {it['quantity']}")
+        lines.append("")
     lines.append("Далее потребуется минимум 1 фото.")
     push_step(flow, "arrival_confirm")
-    await send_prompt(flow, chat_id, "\n".join(lines), ["Всё ОК", "Есть ошибка"])
+    await send_prompt(flow, chat_id, "\n".join(lines).strip(), ["Всё ОК", "Есть ошибка"])
+
+
+async def _show_fix_menu(flow: WarehouseFlow, chat_id: int) -> None:
+    flow.step = "arrival_fix"
+    await send_prompt(flow, chat_id, "Выберите позицию для удаления или следующее действие:", build_arrival_fix_options(flow.data.get("items") or []))
 
 
 async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
@@ -79,7 +83,7 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
     if flow is None or flow.mode != "arrival":
         return False
 
-    if text == "warehouse_prev" or text == "warehouse_next":
+    if text in {"warehouse_prev", "warehouse_next"}:
         if flow.step == "arrival_name":
             return await handle_pagination(flow, chat_id, "prev" if text == "warehouse_prev" else "next", "Поступление ТМЦ: выберите наименование.")
         if flow.step == "arrival_cell_free":
@@ -94,14 +98,14 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
             names.append("Ввести вручную")
             await send_paginated_prompt(flow, chat_id, "Поступление ТМЦ: выберите наименование.", names, page_key="page")
             return True
-        if prev_step in {"arrival_cell_existing", "arrival_cell_free"}:
+        if prev_step in {"arrival_cell_existing", "arrival_cell_free", "arrival_cell_manual"}:
             await _show_cells(flow, chat_id, flow.data.get("current_name", ""))
             return True
-        if prev_step in {"arrival_qty", "arrival_cell_manual"}:
-            flow.step = prev_step
-            await send_info(chat_id, "Введите количество ещё раз." if prev_step == "arrival_qty" else "Введите ячейку вручную.")
+        if prev_step == "arrival_qty":
+            flow.step = "arrival_qty"
+            await send_info(chat_id, "Введите количество ещё раз.")
             return True
-        if prev_step in {"arrival_more", "arrival_confirm", "arrival_photo"}:
+        if prev_step in {"arrival_more", "arrival_confirm", "arrival_fix", "arrival_photo"}:
             await _show_summary(flow, chat_id)
             return True
         await send_info(chat_id, "Назад недоступно на этом шаге.")
@@ -112,8 +116,8 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
         await send_info(chat_id, "Сценарий поступления завершён.")
         return True
 
-    step = flow.step
     items = flow.data.setdefault("items", [])
+    step = flow.step
 
     if step == "arrival_name":
         if text == "Ввести вручную":
@@ -132,12 +136,11 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
         return True
 
     if step == "arrival_cell_existing":
-        cells = flow.data.get("current_cells") or []
         selected = None
-        for item in cells:
+        for item in flow.data.get("current_cells") or []:
             option = f"{item.get('cell', '')} | {item.get('quantity', '')} шт"
             if option == text:
-                selected = item.get("cell", "").strip()
+                selected = str(item.get("cell") or "").strip()
                 break
         if not selected:
             await send_info(chat_id, "Выберите ячейку кнопкой из списка.")
@@ -149,7 +152,7 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
         return True
 
     if step == "arrival_cell_free":
-        if text not in (flow.data.get("current_free_cells") or []):
+        if text not in set(flow.data.get("current_free_cells") or []):
             await send_info(chat_id, "Выберите свободную ячейку кнопкой из списка.")
             return True
         flow.data["current_cell"] = text.strip()
@@ -202,28 +205,36 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
 
     if step == "arrival_confirm":
         if text == "Есть ошибка":
-            if items:
-                deleted = items.pop()
-                await send_info(chat_id, f"Удалена последняя позиция: {deleted['name']} | {deleted['quantity']}.")
-            if not items:
-                flow.step = "arrival_name"
-                names = sorted(set(get_material_names()), key=lambda s: s.lower())
-                names.append("Ввести вручную")
-                await send_paginated_prompt(flow, chat_id, "Поступление ТМЦ: выберите наименование.", names, page_key="page")
-                return True
-            await _show_summary(flow, chat_id)
+            await _show_fix_menu(flow, chat_id)
             return True
         if text == "Всё ОК":
             push_step(flow, "arrival_photo")
-            await send_info(chat_id, "Отправьте минимум 1 фото. Когда закончите, нажмите «Готово».")
-            await send_prompt(flow, chat_id, "Приём фото для поступления.", ["Готово"])
+            await send_prompt(flow, chat_id, "Отправьте минимум 1 фото. Когда закончите, нажмите «Готово».", ["Готово"])
             return True
         await send_info(chat_id, "Выберите «Всё ОК» или «Есть ошибка».")
         return True
 
+    if step == "arrival_fix":
+        if text == "➕ Добавить позицию":
+            flow.step = "arrival_name"
+            names = sorted(set(get_material_names()), key=lambda s: s.lower())
+            names.append("Ввести вручную")
+            await send_paginated_prompt(flow, chat_id, "Поступление ТМЦ: выберите наименование.", names, page_key="page")
+            return True
+        if text == "✅ Закончить":
+            await _show_summary(flow, chat_id)
+            return True
+        for idx, option in enumerate(build_arrival_fix_options(items)[: len(items)]):
+            if option == text:
+                items.pop(idx)
+                await _show_fix_menu(flow, chat_id)
+                return True
+        await send_info(chat_id, "Выберите действие кнопкой.")
+        return True
+
     if step == "arrival_photo":
-        photo_ids = extract_photo_ids(msg)
         photos = flow.data.setdefault("photos", [])
+        photo_ids = extract_photo_ids(msg)
         if photo_ids:
             photos.extend(photo_ids)
             await send_info(chat_id, f"Фото получено: {len(photos)}")
@@ -236,8 +247,8 @@ async def handle_arrival_input(state: WarehouseState, user_id: int, chat_id: int
             return True
         tag = sender_tag(msg, user_id)
         message_link = f"max://warehouse/arrival/{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        write_arrival_row(items, tag, message_link)
         for item in items:
+            write_arrival_row([item], tag, message_link)
             if item.get("from_free") and item.get("cell"):
                 try:
                     remove_free_cell(item["cell"])

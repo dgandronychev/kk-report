@@ -2,27 +2,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.utils.max_api import delete_message, extract_message_id, send_text, send_text_with_reply_buttons
-
-from __future__ import annotations
-
-from warehouse_common import WarehouseState, extract_text, is_control
-from arrival import cmd_arrival_tmc, handle_arrival_input
-from order_wheel import cmd_order_wheels, cmd_update_orders_db, handle_order_input
-from request_tmc import cmd_request_tmc, handle_request_input
-from transfer import cmd_transfer_tmc, handle_transfer_input
-
-__all__ = [
-    "WarehouseState",
-    "cmd_arrival_tmc",
-    "cmd_transfer_tmc",
-    "cmd_request_tmc",
-    "cmd_order_wheels",
-    "cmd_update_orders_db",
-    "try_handle_warehouse_step",
-]
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +37,10 @@ async def reset_warehouse_progress(state: WarehouseState, user_id: int) -> None:
             logger.debug("failed to delete prompt message during reset", exc_info=True)
 
 
-
 def push_step(flow: WarehouseFlow, next_step: str) -> None:
     if flow.step and (not flow.history or flow.history[-1] != flow.step):
         flow.history.append(flow.step)
     flow.step = next_step
-
 
 
 def pop_step(flow: WarehouseFlow) -> Optional[str]:
@@ -68,7 +48,6 @@ def pop_step(flow: WarehouseFlow) -> Optional[str]:
         return None
     flow.step = flow.history.pop()
     return flow.step
-
 
 
 def controls(include_back: bool = True) -> tuple[list[str], list[str]]:
@@ -155,7 +134,6 @@ async def send_info(chat_id: int, text: str) -> None:
     await send_text(chat_id, text)
 
 
-
 def is_control(text: str) -> str:
     normalized = (text or "").strip().lower()
     if normalized in {"выход", "warehouse_exit"}:
@@ -169,13 +147,11 @@ def is_control(text: str) -> str:
     return ""
 
 
-
 def safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(str(value).strip())
     except Exception:
         return default
-
 
 
 def sender_tag(msg: dict, user_id: int) -> str:
@@ -191,7 +167,6 @@ def sender_tag(msg: dict, user_id: int) -> str:
     return str(user_id)
 
 
-
 def extract_text(msg: dict) -> str:
     if not isinstance(msg, dict):
         return ""
@@ -200,7 +175,6 @@ def extract_text(msg: dict) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
-
 
 
 def extract_photo_ids(msg: dict) -> list[str]:
@@ -213,6 +187,9 @@ def extract_photo_ids(msg: dict) -> list[str]:
     for item in attachments:
         if not isinstance(item, dict):
             continue
+        item_type = str(item.get("type") or item.get("kind") or "").lower()
+        if item_type and item_type not in {"photo", "image", "file"}:
+            continue
         for key in ("file_id", "id", "photo_id"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
@@ -221,7 +198,13 @@ def extract_photo_ids(msg: dict) -> list[str]:
     return out
 
 
-async def handle_pagination(flow: WarehouseFlow, chat_id: int, control: str, prompt_text: str, page_key: str = "page") -> bool:
+async def handle_pagination(
+    flow: WarehouseFlow,
+    chat_id: int,
+    control: str,
+    prompt_text: str,
+    page_key: str = "page",
+) -> bool:
     options = flow.data.get("current_options") or []
     if not options:
         return False
@@ -230,7 +213,13 @@ async def handle_pagination(flow: WarehouseFlow, chat_id: int, control: str, pro
     await send_paginated_prompt(flow, chat_id, prompt_text, options, page_key=page_key)
     return True
 
+
 async def try_handle_warehouse_step(state: WarehouseState, user_id: int, chat_id: int, text: str, msg: dict) -> bool:
+    from arrival import handle_arrival_input
+    from order_wheel import handle_order_input
+    from request_tmc import handle_request_input
+    from transfer import handle_transfer_input
+
     incoming = extract_text(msg) or text
     control = is_control(incoming)
     if control == "prev":
