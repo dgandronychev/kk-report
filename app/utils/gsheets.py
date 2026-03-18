@@ -1297,3 +1297,346 @@ def get_order_catalog_snapshot() -> dict[str, list[dict[str, Any]]]:
         "city_tire": sh.worksheet("СИТИ Лето РФ new").get_all_records(),
         "yandex_tire": sh.worksheet("ЯД Лето РФ new").get_all_records(),
     }
+
+
+# --- Warehouse compatibility layer -------------------------------------------------
+
+_CACHE_SKLAD_FILTERED_DATA: Optional[list[list[str]]] = None
+_CACHE_SKLAD_FILTERED_AT: Optional[datetime] = None
+_CACHE_SKLAD_FILTERED_TTL_SEC = 60
+
+
+def _warehouse_url() -> str:
+    return _require_url(URL_GOOGLE_SHEETS_SKLAD, "URL_GOOGLE_SHEETS_SKLAD")
+
+
+def _warehouse_sheet_values(title: str, *, skip_header: bool = False) -> list[list[str]]:
+    rows = _worksheet(_warehouse_url(), title).get_all_values()
+    if skip_header:
+        return rows[1:]
+    return rows
+
+
+def _warehouse_header_indexes(header: list[str], required: list[str]) -> dict[str, int]:
+    index_map: dict[str, int] = {}
+    normalized = {str(name).strip(): idx for idx, name in enumerate(header)}
+    for name in required:
+        if name not in normalized:
+            raise RuntimeError(f"В листе отсутствует обязательная колонка: {name}")
+        index_map[name] = normalized[name]
+    return index_map
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        text = str(value).strip().replace(',', '.')
+        return int(float(text)) if text else default
+    except Exception:
+        return default
+
+
+def load_sklad_data(force_reload: bool = False) -> list[list[str]]:
+    global _CACHE_SKLAD_FILTERED_DATA, _CACHE_SKLAD_FILTERED_AT
+    now = datetime.now()
+    if (
+        not force_reload
+        and _CACHE_SKLAD_FILTERED_DATA is not None
+        and _CACHE_SKLAD_FILTERED_AT is not None
+        and (now - _CACHE_SKLAD_FILTERED_AT).total_seconds() <= _CACHE_SKLAD_FILTERED_TTL_SEC
+    ):
+        return _CACHE_SKLAD_FILTERED_DATA
+
+    try:
+        data = _warehouse_sheet_values("Склад", skip_header=False)
+        if not data:
+            _CACHE_SKLAD_FILTERED_DATA = []
+            _CACHE_SKLAD_FILTERED_AT = now
+            return []
+
+        header = data[0]
+        idx = _warehouse_header_indexes(header, ["Наименование", "Количество", "Ячейка"])
+        filtered: list[list[str]] = [header]
+        for row in data[1:]:
+            if len(row) <= max(idx.values()):
+                continue
+            qty_str = str(row[idx["Количество"]]).strip()
+            if not qty_str:
+                continue
+            qty_norm = qty_str.replace(',', '.')
+            try:
+                qty = float(qty_norm)
+            except ValueError:
+                filtered.append(row)
+                continue
+            if qty != 0:
+                filtered.append(row)
+
+        _CACHE_SKLAD_FILTERED_DATA = filtered
+        _CACHE_SKLAD_FILTERED_AT = now
+        return filtered
+    except Exception as exc:
+        logger.exception("Ошибка при загрузке данных склада: %s", exc)
+        _CACHE_SKLAD_FILTERED_DATA = []
+        _CACHE_SKLAD_FILTERED_AT = now
+        return []
+
+
+def get_material_names() -> list[str]:
+    data = load_sklad_data()
+    if not data:
+        return []
+    header = data[0]
+    try:
+        idx_name = _warehouse_header_indexes(header, ["Наименование"])["Наименование"]
+    except Exception:
+        return []
+    names = [str(row[idx_name]).strip() for row in data[1:] if len(row) > idx_name and str(row[idx_name]).strip()]
+    return sorted(set(names), key=lambda s: s.lower())
+
+
+def get_material_quantity(material_name: str) -> str:
+    totals = get_material_total_quantity_map()
+    qty = totals.get(str(material_name).strip())
+    return str(qty) if qty is not None else ""
+
+
+def get_recipient_names() -> list[str]:
+    try:
+        ws = _worksheet(_warehouse_url(), "Справочник")
+        values = ws.col_values(1)[1:]
+        return [str(value).strip() for value in values if str(value).strip()]
+    except Exception as exc:
+        logger.exception("Ошибка при загрузке получателей: %s", exc)
+        return []
+
+
+def get_material_cells(material_name: str) -> list[dict[str, str]]:
+    rows = get_material_cells_with_row_indexes(material_name)
+    result: list[dict[str, str]] = []
+    for row in rows:
+        quantity = row.get("quantity", 0)
+        if _safe_int(quantity, 0) == 0:
+            continue
+        result.append({
+            "cell": str(row.get("cell") or "").strip(),
+            "quantity": str(row.get("quantity") if row.get("quantity") is not None else "0"),
+        })
+    return result
+
+
+def write_row_to_sheet(worksheet_name: str, row: list[Any]) -> None:
+    try:
+        _append_row(_warehouse_url(), worksheet_name, row, value_input_option="USER_ENTERED")
+    except Exception as exc:
+        logger.exception("Ошибка записи строки в таблицу %s: %s", worksheet_name, exc)
+
+
+def write_arrival_row(arrival_items: list[dict[str, Any]], user_tag: str, message_link: str) -> None:
+    current_dt = _now_msk().strftime("%d.%m.%Y %H:%M:%S")
+    rows = []
+    for item in arrival_items:
+        rows.append([
+            current_dt,
+            "Поступление",
+            "",
+            item.get("name", ""),
+            item.get("quantity", ""),
+            "",
+            user_tag,
+            message_link,
+            item.get("cell", ""),
+        ])
+    if rows:
+        _append_rows(_warehouse_url(), "Передача/поступление", rows, value_input_option="USER_ENTERED")
+
+
+def write_transfer_row(transfer_items: list[dict[str, Any]], recipient: str, user_tag: str, message_link: str) -> None:
+    current_dt = _now_msk().strftime("%d.%m.%Y %H:%M:%S")
+    rows = []
+    for item in transfer_items:
+        rows.append([
+            current_dt,
+            "Выдача",
+            "",
+            item.get("name", ""),
+            item.get("quantity", ""),
+            recipient,
+            user_tag,
+            message_link,
+            item.get("cell", ""),
+        ])
+    if rows:
+        _append_rows(_warehouse_url(), "Передача/поступление", rows, value_input_option="USER_ENTERED")
+
+
+def return_cell_to_free(cell: str) -> None:
+    try:
+        warehouse_url = _warehouse_url()
+        sklad_ws = _worksheet(warehouse_url, "Склад")
+        free_ws = _worksheet(warehouse_url, "Справочник ячеек")
+        data = sklad_ws.get_all_values()
+        if not data:
+            return
+        header = data[0]
+        idx = _warehouse_header_indexes(header, ["Ячейка"])
+        col_cell = idx["Ячейка"] + 1
+        for row_index, row in enumerate(data[1:], start=2):
+            if len(row) > idx["Ячейка"] and str(row[idx["Ячейка"]]).strip() == str(cell).strip():
+                sklad_ws.update_cell(row_index, col_cell, "")
+                break
+        free_ws.append_row([cell], value_input_option="USER_ENTERED")
+    except Exception as exc:
+        logger.exception("Ошибка возврата ячейки в справочник свободных: %s", exc)
+
+
+def get_free_cells() -> list[str]:
+    try:
+        data = _warehouse_sheet_values("Справочник ячеек", skip_header=False)
+        if not data:
+            return []
+        free: list[str] = []
+        for row in data[1:]:
+            if row and str(row[0]).strip():
+                free.append(str(row[0]).strip())
+        return free
+    except Exception as exc:
+        logger.exception("Ошибка загрузки свободных ячеек: %s", exc)
+        return []
+
+
+def remove_free_cell(cell: str) -> None:
+    try:
+        reserve_free_cell(cell)
+    except Exception as exc:
+        logger.exception("Ошибка удаления свободной ячейки: %s", exc)
+
+
+def get_data_order(name: str) -> list[dict[str, Any]]:
+    order_url = _require_url(URL_GOOGLE_SHEETS_ORDER, "URL_GOOGLE_SHEETS_ORDER")
+    return _worksheet(order_url, name).get_all_records()
+
+
+def load_data_rez_disk() -> None:
+    import app.config as cfg
+    cfg.BAZA_DISK_SITY = get_data_order("Сити Диски сити new")
+    cfg.BAZA_DISK_YNDX = get_data_order("ЯД Диски")
+    cfg.BAZA_REZN_SITY = get_data_order("СИТИ Лето РФ new")
+    cfg.BAZA_REZN_YNDX = get_data_order("ЯД Лето РФ new")
+
+
+def get_shm_locations_by_company(company_ui: str) -> list[str]:
+    return get_shm_locations_by_company_normalized(company_ui)
+
+
+def get_next_request_number() -> str:
+    try:
+        rows = _worksheet(_warehouse_url(), "Реестр заказ ТМЦ").col_values(2)[1:]
+        max_num = 0
+        for value in rows:
+            text = str(value).strip().lower()
+            if not text.startswith("zv"):
+                continue
+            digits = text[2:]
+            try:
+                max_num = max(max_num, int(digits))
+            except ValueError:
+                continue
+        return f"zv{max_num + 1 if max_num > 0 else 1}"
+    except Exception as exc:
+        logger.exception("Ошибка получения номера заявки ТМЦ: %s", exc)
+        return "zv1"
+
+
+def write_request_tmc_rows(
+    request_number: str,
+    fio: str,
+    tag: str,
+    department: str,
+    items: list[dict[str, Any]],
+    message_link: str,
+) -> None:
+    current_dt = _now_msk().strftime("%d.%m.%Y %H:%M:%S")
+    rows: list[list[Any]] = []
+    for item in items:
+        rows.append([
+            current_dt,
+            request_number,
+            fio,
+            tag,
+            department,
+            item.get("name", ""),
+            item.get("quantity", ""),
+            "Новая",
+            message_link,
+        ])
+    if rows:
+        _append_rows(_warehouse_url(), "Реестр заказ ТМЦ", rows, value_input_option="USER_ENTERED")
+
+
+def get_open_request_numbers() -> list[str]:
+    try:
+        data = _worksheet(_warehouse_url(), "Реестр заказ ТМЦ").get_all_values()
+        if not data:
+            return []
+        header = data[0]
+        idx = _warehouse_header_indexes(header, ["Номер заявки", "Статус"])
+        result = {
+            str(row[idx["Номер заявки"]]).strip()
+            for row in data[1:]
+            if len(row) > max(idx.values())
+            and str(row[idx["Номер заявки"]]).strip()
+            and str(row[idx["Статус"]]).strip().lower() == "новая"
+        }
+        return sorted(result)
+    except Exception as exc:
+        logger.exception("Ошибка получения открытых заявок ТМЦ: %s", exc)
+        return []
+
+
+def get_request_items(request_number: str) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    try:
+        data = _worksheet(_warehouse_url(), "Реестр заказ ТМЦ").get_all_values()
+        if not data:
+            return []
+        header = data[0]
+        idx = _warehouse_header_indexes(header, ["Номер заявки", "Вид ТМЦ", "Кол-во"])
+        for row in data[1:]:
+            if len(row) <= max(idx.values()):
+                continue
+            if str(row[idx["Номер заявки"]]).strip() != str(request_number).strip():
+                continue
+            name = str(row[idx["Вид ТМЦ"]]).strip()
+            qty = str(row[idx["Кол-во"]]).strip()
+            if name:
+                items.append({"name": name, "quantity": qty})
+        return items
+    except Exception as exc:
+        logger.exception("Ошибка чтения позиций заявки ТМЦ: %s", exc)
+        return []
+
+
+def update_request_status(request_number: str, status: str, message_link: Optional[str] = None) -> None:
+    try:
+        ws = _worksheet(_warehouse_url(), "Реестр заказ ТМЦ")
+        data = ws.get_all_values()
+        if not data:
+            return
+        header = data[0]
+        idx = _warehouse_header_indexes(header, ["Номер заявки", "Статус", "Ссылка на отчет"])
+        col_status = chr(ord('A') + idx["Статус"])
+        col_link = chr(ord('A') + idx["Ссылка на отчет"])
+        updates: list[dict[str, Any]] = []
+        for row_index, row in enumerate(data[1:], start=2):
+            if len(row) <= idx["Номер заявки"]:
+                continue
+            if str(row[idx["Номер заявки"]]).strip() != str(request_number).strip():
+                continue
+            if message_link is None:
+                updates.append({"range": f"{col_status}{row_index}", "values": [[status]]})
+            else:
+                updates.append({"range": f"{col_status}{row_index}:{col_link}{row_index}", "values": [[status, message_link]]})
+        if updates:
+            _batch_update(_warehouse_url(), "Реестр заказ ТМЦ", updates)
+    except Exception as exc:
+        logger.exception("Ошибка обновления статуса заявки ТМЦ: %s", exc)
