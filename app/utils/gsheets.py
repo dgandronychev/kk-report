@@ -10,7 +10,8 @@ from typing import Any, Callable, Optional, TypeVar
 import gspread
 from gspread import Client
 from gspread.exceptions import APIError
-from gspread.models import Spreadsheet, Worksheet
+from gspread.spreadsheet import Spreadsheet
+from gspread.worksheet import Worksheet
 
 from app.config import (
     GOOGLE_SHEETS_SHIFT,
