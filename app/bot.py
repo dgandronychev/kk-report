@@ -135,6 +135,44 @@ _report_expense = ReportExpenseState()
 _move = MoveState()
 _warehouse = WarehouseState()
 _menu_prompt_message_ids: dict[int, str] = {}
+_route_tasks: set[asyncio.Task[None]] = set()
+_user_route_tails: dict[int, asyncio.Task[None]] = {}
+
+
+async def _route_after(
+    previous: asyncio.Task[None] | None,
+    user_id: int,
+    chat_id: int,
+    text: str,
+    msg: dict,
+) -> None:
+    if previous is not None:
+        try:
+            await previous
+        except asyncio.CancelledError:
+            pass
+
+    try:
+        await _route_text(user_id, chat_id, text, msg)
+    except Exception:
+        logging.exception("handler failed user_id=%s chat_id=%s", user_id, chat_id)
+
+
+def _forget_route_task(user_id: int, task: asyncio.Task[None]) -> None:
+    _route_tasks.discard(task)
+    if _user_route_tails.get(user_id) is task:
+        _user_route_tails.pop(user_id, None)
+
+
+def _schedule_route(user_id: int, chat_id: int, text: str, msg: dict) -> None:
+    previous = _user_route_tails.get(user_id)
+    task = asyncio.create_task(
+        _route_after(previous, user_id, chat_id, text, msg),
+        name=f"route-user-{user_id}",
+    )
+    _user_route_tails[user_id] = task
+    _route_tasks.add(task)
+    task.add_done_callback(lambda done, uid=user_id: _forget_route_task(uid, done))
 
 # ===== MAX update parsing helpers =====
 def _extract_message(update: dict) -> Optional[dict]:
@@ -689,10 +727,7 @@ async def _polling_loop() -> None:
                 if not text and not _has_attachments(msg) and not isinstance(msg.get("callback"), dict):
                     continue
 
-                try:
-                    await _route_text(user_id, chat_id, text, msg)
-                except Exception:
-                    logging.exception("handler failed user_id=%s chat_id=%s", user_id, chat_id)
+                _schedule_route(user_id, chat_id, text, msg)
 
         except Exception:
             logging.exception("polling error; retry in 2s")

@@ -7,8 +7,16 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+class _TransportFailure:
+    pass
+
+
+_TRANSPORT_ERROR = _TransportFailure()
+
+
 def _api_base(bot_token: str | None = None) -> str:
-    token = bot_token.strip()
+    token = (bot_token or "").strip()
     if not token:
         return ""
     return f"https://api.telegram.org/bot{token}"
@@ -52,13 +60,17 @@ def build_message_link(chat_id: int, message_id: int | str, thread_id: int | Non
     return f"{base}/{message_id}"
 
 
-async def _telegram_call(method: str, payload: dict, bot_token: str | None = None) -> Optional[dict]:
+async def _telegram_call(method: str, payload: dict, bot_token: str | None = None) -> dict | _TransportFailure | None:
     api_base = _api_base(bot_token)
     if not api_base:
         return None
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        timeout = httpx.Timeout(30, connect=5)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(f"{api_base}/{method}", json=payload)
+    except httpx.TransportError as exc:
+        logger.warning("telegram transport failed | method=%s | error=%s", method, type(exc).__name__)
+        return _TRANSPORT_ERROR
     except Exception:
         logger.exception("telegram call failed with exception | method=%s", method)
         return None
@@ -132,6 +144,9 @@ async def send_report(
             payload["message_thread_id"] = thread_id
 
         data = await _telegram_call("sendMediaGroup", payload, bot_token=bot_token)
+        if data is _TRANSPORT_ERROR:
+            logger.warning("sendMediaGroup transport failed, skipping sendMessage fallback")
+            return None
         if not isinstance(data, dict):
             logger.warning("sendMediaGroup failed, falling back to sendMessage")
             return await send_text(chat_id=chat_id, text=text, thread_id=thread_id, bot_token=bot_token)
