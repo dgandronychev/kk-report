@@ -122,6 +122,21 @@ async def _refresh_reference_caches(chat_id: int) -> None:
         return
 
     await send_text(chat_id, "Обновление завершено")
+
+
+def _log_update_data_attempt(user_id: int, chat_id: int, msg: dict, *, allowed: bool) -> None:
+    sender = msg.get("sender") if isinstance(msg.get("sender"), dict) else {}
+    logger.info(
+        "update_data attempt | result=%s | user_id=%s | chat_id=%s | username=%r | first_name=%r | last_name=%r",
+        "allowed" if allowed else "denied",
+        user_id,
+        chat_id,
+        sender.get("username"),
+        sender.get("first_name"),
+        sender.get("last_name"),
+    )
+
+
 # ===== State (позже вынесешь в отдельный storage) =====
 _reg = RegistrationState(wait_phone_users=set())
 _shift = work_shift.WorkShiftState()
@@ -624,7 +639,9 @@ async def _route_text(user_id: int, chat_id: int, text: str, msg: dict) -> None:
         return
 
     if t == "/update_data":
-        if UPDATE_DATA_ALLOWED_USER_IDS and user_id not in UPDATE_DATA_ALLOWED_USER_IDS:
+        allowed = not UPDATE_DATA_ALLOWED_USER_IDS or user_id in UPDATE_DATA_ALLOWED_USER_IDS
+        _log_update_data_attempt(user_id, chat_id, msg, allowed=allowed)
+        if not allowed:
             await send_text(chat_id, "У вас нет прав для вызова данной команды")
             return
         await _refresh_reference_caches(chat_id)
