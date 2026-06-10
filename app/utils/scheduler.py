@@ -12,8 +12,8 @@ from collections import defaultdict
 from zoneinfo import ZoneInfo
 
 from app.utils.max_api import send_text_sync
-from app.utils.gsheets import find_logistics_rows_shift, get_record_sklad
-from app.config import LOGISTICS_CHAT_IDS, REPORT_CHAT_ID, TABLO_CHAT_ID
+from app.utils.gsheets import find_logistics_rows_shift, get_record_sklad, load_city_report_rows
+from app.config import CITY_REPORT_CHAT_ID, LOGISTICS_CHAT_IDS, REPORT_CHAT_ID, TABLO_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,8 @@ DEFAULT_SCHEDULES = Schedules(
     logistics_times=[time(8, 5), time(21, 5)],
     report_times=[time(21, 55), time(23, 55), time(2, 55), time(5, 55)],
 )
+CITY_REPORT_TIME = time(9, 30)
+MAX_TEXT_LENGTH = 3900
 
 
 def _next_run(now: datetime, times: List[time]) -> datetime:
@@ -194,6 +196,70 @@ def _build_logistics_text(now: datetime) -> str:
         "Доброго времени суток!\n"
         f"Сегодня ответственные логисты CleanCar с {begin} до {end}:\n{logistics}"
     )
+
+
+def _split_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> list[str]:
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines():
+        while len(line) > max_length:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:max_length])
+            line = line[max_length:]
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > max_length:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _build_city_report_text() -> str:
+    rows = load_city_report_rows()
+    return "\n".join(
+        f"{name}: {value}" if name and value else name or value
+        for name, value in rows
+    )
+
+
+def send_city_report_once() -> None:
+    chat_id = _parse_int_from_config(CITY_REPORT_CHAT_ID)
+    if not chat_id:
+        logger.warning("CITY_REPORT_CHAT_ID is empty; city report not sent")
+        return
+
+    text = _build_city_report_text()
+    if not text:
+        logger.warning("City report sheet contains no data; city report not sent")
+        return
+
+    for chunk in _split_text(text):
+        send_text_sync(chat_id, chunk)
+
+
+def _city_report_loop() -> None:
+    chat_id = _parse_int_from_config(CITY_REPORT_CHAT_ID)
+    if not chat_id:
+        logger.warning("CITY_REPORT_CHAT_ID is empty; city report scheduler disabled")
+        return
+
+    while True:
+        try:
+            now = datetime.now(TZ_MSK)
+            target = _next_run(now, [CITY_REPORT_TIME])
+            delay = max(0.0, (target - now).total_seconds())
+
+            logger.info("Next MAX city report at %s (in %.0fs)", target.isoformat(), delay)
+            time_mod.sleep(delay)
+            send_city_report_once()
+        except Exception:
+            logger.exception("City report scheduler loop error; retry in 60s")
+            time_mod.sleep(60)
 
 
 def _logistics_loop(schedules: Schedules) -> None:
@@ -244,5 +310,6 @@ def _report_loop(schedules: Schedules) -> None:
 
 def start_schedulers(schedules: Schedules = DEFAULT_SCHEDULES) -> None:
     threading.Thread(target=_logistics_loop, args=(schedules,), daemon=True).start()
+    threading.Thread(target=_city_report_loop, daemon=True).start()
     # threading.Thread(target=_report_loop, args=(schedules,), daemon=True).start()
     # threading.Thread(target=_wheels_loop, daemon=True).start()

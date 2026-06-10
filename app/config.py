@@ -18,6 +18,7 @@ URL_GET_INFO_TASK = "https://stage.app.clean-car.net/api/v2/bots/open_tasks/list
 
 LOGISTICS_CHAT_IDS = "-70635401257012,-70646361948407,-70637799415860"
 REPORT_CHAT_ID = "199909595"
+CITY_REPORT_CHAT_ID = os.environ.get("CITY_REPORT_CHAT_ID", "-70628091953399").strip()
 HUB_REPORT_DB_PATH = os.environ.get("HUB_REPORT_DB_PATH", "data/xab_messages.db")
 
 URL_GOOGLE_SHEETS_CHART = "https://docs.google.com/spreadsheets/d/15Kw7bweFKg3Dp0INeA47eki1cuPIgtVgk_o_Ul3LGyM/edit?gid=1647640846#gid=1647640846"
@@ -32,6 +33,8 @@ GSPREAD_URL_INFO_RASXOD_SHM = "https://docs.google.com/spreadsheets/d/14vrAidePm
 URL_GOOGLE_SHEETS_SKLAD = "https://docs.google.com/spreadsheets/d/1AXHC70D-KLaJTo56XN91oypsknL1jTUQh6Tl6Bawlrw/edit?gid=0"
 URL_GOOGLE_SHEETS_ORDER = "https://docs.google.com/spreadsheets/d/1A06mPQgZlPa6k7ZGZxM1mCkHUhBkx5xe15XE_9X0tEw/edit?gid=0#gid=0"
 URL_GOOGLE_SHEETS_LOC_SHM ="https://docs.google.com/spreadsheets/d/11KMV5u-toR8O1RdEuEHJTwNGKo2lS5BZQaU-TWqgYm4/edit?gid=0#gid=0"
+CITY_REPORT_SHEET_URL = "https://docs.google.com/spreadsheets/d/13R4dwP6qGvh1NYmz3hkRoTKuCiabC4JZjazN3QnTYH0/edit?gid=1008372049#gid=1008372049"
+CITY_REPORT_SHEET_NAME = "Отчет Сити"
 
 GOOGLE_DRIVE_CREDS_JSON = os.environ.get("GOOGLE_DRIVE_CREDS_JSON", "app/creds.json")
 GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_DAMAGE_BELKA_FOLDER_ID", "1EzE_RQBt8-tkbPstIll_KfdOUAwY3564")

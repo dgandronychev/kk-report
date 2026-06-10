@@ -14,6 +14,8 @@ from gspread.spreadsheet import Spreadsheet
 from gspread.worksheet import Worksheet
 
 from app.config import (
+    CITY_REPORT_SHEET_NAME,
+    CITY_REPORT_SHEET_URL,
     GOOGLE_SHEETS_SHIFT,
     GSPREAD_URL_ANSWER,
     GSPREAD_URL_GATES,
@@ -275,6 +277,21 @@ def _open_sklad_sheet() -> Spreadsheet:
 
 def loading_bz_znaniya(company: str) -> list[list[str]]:
     return _sheet_values(GSPREAD_URL_MAIN, company)
+
+
+def load_city_report_rows() -> list[tuple[str, str]]:
+    def _op() -> list[tuple[str, str]]:
+        rows = _worksheet(CITY_REPORT_SHEET_URL, CITY_REPORT_SHEET_NAME).get("A:B")
+        result: list[tuple[str, str]] = []
+        for row in rows:
+            name = str(row[0]).strip() if row else ""
+            value = str(row[1]).strip() if len(row) > 1 else ""
+            if not name and not value:
+                break
+            result.append((name, value))
+        return result
+
+    return _with_retries(_op, action_name=f"load_city_report:{CITY_REPORT_SHEET_NAME}")
 
 
 def load_expense_guide() -> dict[str, list[str]]:
